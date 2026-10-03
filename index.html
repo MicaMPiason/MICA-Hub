@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MICA Hub</title>
+  <link rel="icon" type="image/png" href="assets/Logotipo%20M%20com%20Hub%20Azul-Ciano.png">
+  <link rel="stylesheet" href="assets/css/variables.css">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <link rel="stylesheet" href="assets/css/responsive.css">
+  <script id="estado-salvo" type="application/json">{}</script>
+  <script src="assets/js/data.js" defer></script>
+  <script src="assets/js/storage.js" defer></script>
+  <script src="assets/js/search.js" defer></script>
+  <script src="assets/js/proposals.js" defer></script>
+  <script src="assets/js/app.js" defer></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Navegação principal">
+    <button class="brand-mark" data-view="hoje" aria-label="MICA Hub — início">M<span>+</span></button>
+    <nav class="side-nav">
+      <button class="side-link is-active" data-view="hoje" aria-label="Hoje" data-tip="Hoje"><span data-icon="sun"></span></button>
+      <button class="side-link" data-view="pipeline" aria-label="Pipeline" data-tip="Pipeline"><span data-icon="columns"></span></button>
+      <button class="side-link" data-view="leads" aria-label="Leads" data-tip="Leads"><span data-icon="users"></span></button>
+      <button class="side-link" data-view="agenda" aria-label="Agenda" data-tip="Agenda"><span data-icon="calendar"></span></button>
+      <button class="side-link" data-view="dashboard" aria-label="Dashboard" data-tip="Dashboard"><span data-icon="chart"></span></button>
+      <button class="side-link" data-view="relatorios" aria-label="Relatórios por Segmento" data-tip="Relatórios"><span data-icon="target"></span></button>
+      <button class="side-link" data-view="propostas" aria-label="Propostas" data-tip="Propostas"><span data-icon="note"></span></button>
+      <button class="side-link" data-view="catalogo" aria-label="Serviços e Produtos" data-tip="Serviços / Produtos"><span data-icon="columns"></span></button>
+      <button class="side-link" data-view="financeiro" aria-label="Financeiro" data-tip="Financeiro"><span data-icon="dollar"></span></button>
+    </nav>
+    <nav class="side-nav side-nav-bottom">
+      <button class="side-link" data-action="open-data" aria-label="Importar e exportar" data-tip="Importar / Exportar"><span data-icon="database"></span></button>
+      <button class="side-link" data-view="configuracoes" aria-label="Configurações" data-tip="Configurações"><span data-icon="settings"></span></button>
+    </nav>
+  </aside>
+
+  <section class="workspace">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="eyebrow" id="page-eyebrow">COCKPIT COMERCIAL</span>
+        <h1 id="page-title">Hoje</h1>
+      </div>
+      <div class="day-strip" id="day-strip" aria-label="Resumo da agenda de hoje"></div>
+      <label class="segment-switcher" for="business-segment-filter">
+        <span>Tipo de negócio</span>
+        <select id="business-segment-filter" aria-label="Tipo de negócio atual"></select>
+      </label>
+      <div class="global-search-wrap">
+        <label class="global-search">
+          <span data-icon="search"></span>
+          <input type="search" id="global-search" placeholder="Buscar nome, empresa, telefone, cidade, tag..." autocomplete="off" aria-label="Pesquisar leads" aria-controls="search-suggestions" aria-expanded="false">
+          <button type="button" class="search-clear" data-action="clear-search" aria-label="Limpar pesquisa" hidden>×</button>
+          <kbd>/</kbd>
+        </label>
+        <div class="search-suggestions" id="search-suggestions" role="listbox" aria-label="Resultados da pesquisa" hidden></div>
+      </div>
+      <div class="save-state" id="save-state" aria-live="polite"><i></i><span>Carregando</span></div>
+      <button class="icon-btn" data-action="open-data" aria-label="Backup e importação"><span data-icon="database"></span></button>
+      <button class="btn btn-primary" data-action="new-lead"><span data-icon="plus"></span>Novo lead</button>
+    </header>
+
+    <div class="notice" id="notice" hidden role="status"></div>
+    <main class="view-root" id="view-root" tabindex="-1"></main>
+  </section>
+</div>
+
+<div class="scrim" id="drawer-scrim"></div>
+<aside class="lead-drawer" id="lead-drawer" aria-hidden="true" aria-label="Ficha do lead"></aside>
+<div class="modal-layer" id="modal-layer" aria-live="polite"></div>
+<div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+<input type="file" id="file-spreadsheet" accept=".xlsx,.csv,.txt" hidden>
+<input type="file" id="file-backup" accept=".json" hidden>
+</body>
+</html>
