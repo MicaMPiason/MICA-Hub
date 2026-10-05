@@ -3,11 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
   <title>MICA Hub</title>
   <link rel="icon" type="image/png" href="assets/Logotipo%20M%20com%20Hub%20Azul-Ciano.png">
+  <script>
+    (function(){
+      var preference="system";
+      try{preference=localStorage.getItem("mica-theme")||"system";}catch(error){}
+      if(["system","light","dark"].indexOf(preference)<0)preference="system";
+      var resolved=preference==="system"?(window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):preference;
+      document.documentElement.dataset.theme=resolved;
+      document.documentElement.dataset.themePreference=preference;
+    })();
+  </script>
   <link rel="stylesheet" href="assets/css/variables.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/responsive.css">
+  <link rel="stylesheet" href="assets/css/theme-light.css">
   <script id="estado-salvo" type="application/json">{}</script>
   <script src="assets/js/data.js" defer></script>
   <script src="assets/js/storage.js" defer></script>

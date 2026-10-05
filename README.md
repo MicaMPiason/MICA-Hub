@@ -11,7 +11,8 @@ CRM local para organizar prospecção comercial, pipeline, tarefas, agenda, hist
 │   ├── css/
 │   │   ├── variables.css
 │   │   ├── app.css
-│   │   └── responsive.css
+│   │   ├── responsive.css
+│   │   └── theme-light.css
 │   ├── Logotipo M com Hub Azul-Ciano.png
 │   └── js/
 │       ├── data.example.js
@@ -46,6 +47,7 @@ A camada em `assets/js/storage.js` centraliza o acesso ao `localStorage` sem alt
 - `crm_climatizacao_sp_v1`: estado legado, mantido para migração e recuperação;
 - `crm_climatizacao_sp_v2`: estado atual com leads, fichas, histórico, tarefas, negociações, segmentos, financeiro, propostas, catálogo, metas, última carteira selecionada, configurações e templates.
 - `mica_proposta_modelo_v1`: configuração do antigo gerador isolado, lida somente como origem de migração para preservar os valores já cadastrados.
+- `mica-theme`: preferência visual local (`system`, `light` ou `dark`).
 
 O CRM continua migrando automaticamente dados v1 quando necessário. Backups JSON e HTML autocontido permanecem disponíveis pela interface.
 
@@ -66,6 +68,8 @@ A área **Propostas** cria, edita, duplica, visualiza e exclui propostas comerci
 Os dados da empresa são reutilizados entre propostas. Cada proposta mantém uma cópia dos seus itens, portanto editar ou excluir um item do catálogo não altera documentos já salvos. A prévia segue o modelo editorial original e o botão **Imprimir / PDF** usa a impressão nativa do navegador com páginas A4 e sem os controles do CRM.
 
 A área **Serviços / Produtos** oferece cadastro, edição, ativação, desativação, exclusão, busca e filtros. Propostas, empresa, catálogo e numeração automática ficam dentro de `proposals` no estado v2 e participam dos backups e restaurações.
+
+O serviço principal `Criação de site institucional` é a referência de valor potencial para leads que ainda não possuem proposta ou negociação informada. Quando existe uma proposta vinculada ao lead, o total real da proposta passa a alimentar o pipeline e o dashboard; valores negociados e fechados continuam tendo prioridade. Propostas já salvas mantêm seus valores históricos quando o catálogo é editado.
 
 ## Financeiro
 
@@ -101,9 +105,14 @@ As importações sempre adicionam registros e não substituem a base existente.
 
 ## CSS
 
-- `variables.css`: tokens de cor, tipografia, espaçamento, raios e sombras;
+- `variables.css`: tokens de cor, tipografia, espaçamento, raios e sombras dos temas escuro e claro;
 - `app.css`: estilos base, layout, componentes e documento A4 das propostas;
-- `responsive.css`: media queries e adaptações para telas menores.
+- `responsive.css`: media queries e adaptações para telas menores;
+- `theme-light.css`: ajustes claros dos componentes, sem alterar o documento A4 das propostas.
+
+## Aparência
+
+Em **Configurações → Aparência**, o usuário pode escolher entre **Sistema**, **Claro** e **Escuro**. A preferência é aplicada antes da interface aparecer para evitar troca visível de cores e fica salva somente no navegador. A opção Sistema acompanha automaticamente o tema claro ou escuro do dispositivo.
 
 ## JavaScript
 

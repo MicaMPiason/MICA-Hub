@@ -7,3 +7,11 @@
     --r-sm:12px; --r:18px; --r-lg:26px; --sidebar:76px;
     --font:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
   }
+
+  [data-theme="light"]{
+    --bg:#F4F6F1; --bg-soft:#EEF2EB; --surface:#FFFFFF; --surface-2:#F8FAF6; --surface-3:#EEF2EB;
+    --paper:#FFFFFF; --paper-2:#F8FAF6; --ink:#111611; --muted:#6E776C; --muted-2:#8A9387;
+    --dark-ink:#111611; --dark-muted:#6E776C; --accent:#B8FF4F; --accent-2:#A8EE3F; --accent-ink:#102000;
+    --danger:#D9534F; --warning:#C98316; --info:#4C84C6; --success:#2FA66D; --violet:#7C66C8;
+    --line:#DDE4D9; --line-dark:#D7DDD3; --shadow:0 20px 55px rgba(24,35,20,.12); --shadow-sm:0 6px 20px rgba(24,35,20,.07);
+  }
