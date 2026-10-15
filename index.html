@@ -6,28 +6,23 @@
   <meta name="color-scheme" content="dark light">
   <title>MICA Hub</title>
   <link rel="icon" type="image/png" href="assets/Logotipo%20M%20com%20Hub%20Azul-Ciano.png">
-  <script>
-    (function(){
-      var preference="system";
-      try{preference=localStorage.getItem("mica-theme")||"system";}catch(error){}
-      if(["system","light","dark"].indexOf(preference)<0)preference="system";
-      var resolved=preference==="system"?(window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):preference;
-      document.documentElement.dataset.theme=resolved;
-      document.documentElement.dataset.themePreference=preference;
-    })();
-  </script>
+  <script src="assets/js/theme-init.js"></script>
   <link rel="stylesheet" href="assets/css/variables.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/responsive.css">
   <link rel="stylesheet" href="assets/css/theme-light.css">
+  <link rel="stylesheet" href="assets/css/auth.css">
   <script id="estado-salvo" type="application/json">{}</script>
   <script src="assets/js/data.js" defer></script>
   <script src="assets/js/storage.js" defer></script>
   <script src="assets/js/search.js" defer></script>
   <script src="assets/js/proposals.js" defer></script>
   <script src="assets/js/app.js" defer></script>
+  <script src="assets/js/supabase-config.js" defer></script>
+  <script src="assets/js/cloud.js" defer></script>
 </head>
-<body>
+<body class="auth-locked">
+<main id="auth-root" hidden aria-live="polite"></main>
 <div class="app-shell">
   <aside class="sidebar" aria-label="Navegação principal">
     <button class="brand-mark" data-view="hoje" aria-label="MICA Hub — início">M<span>+</span></button>
@@ -69,6 +64,7 @@
         <div class="search-suggestions" id="search-suggestions" role="listbox" aria-label="Resultados da pesquisa" hidden></div>
       </div>
       <div class="save-state" id="save-state" aria-live="polite"><i></i><span>Carregando</span></div>
+      <div id="cloud-account" class="cloud-account" hidden><span data-user-email></span><button class="btn btn-sm" data-cloud-account>Conta</button><button class="btn btn-sm" data-cloud-signout>Sair</button></div>
       <button class="icon-btn" data-action="open-data" aria-label="Backup e importação"><span data-icon="database"></span></button>
       <button class="btn btn-primary" data-action="new-lead"><span data-icon="plus"></span>Novo lead</button>
     </header>

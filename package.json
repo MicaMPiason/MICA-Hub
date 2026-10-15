@@ -1,0 +1,14 @@
+{
+  "name": "mica-hub",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && node scripts/server.mjs",
+    "test": "node tests/smoke-test.mjs",
+    "test:security": "node tests/security-test.mjs"
+  },
+  "dependencies": { "@supabase/supabase-js": "2.118.0" },
+  "devDependencies": { "esbuild": "0.28.2", "supabase": "2.121.0" }
+}

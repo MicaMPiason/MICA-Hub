@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const host = "127.0.0.1";
 const port = 8000;
 const mimeTypes = {

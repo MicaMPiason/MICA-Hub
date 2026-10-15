@@ -1,6 +1,45 @@
 # MICA Hub
 
-CRM local para organizar prospecção comercial, pipeline, tarefas, agenda, histórico de contatos, propostas, catálogo de serviços e produtos, indicadores e controle financeiro. Leads podem ser separados por tipo de negócio e importados por CSV, TXT, XLSX ou lista colada. A aplicação usa somente HTML, CSS e JavaScript e não depende de backend ou etapa de build.
+CRM para organizar prospecção comercial, pipeline, tarefas, agenda, propostas e financeiro. A versão online usa Supabase Auth e banco privado por usuário. A interface permanece em HTML, CSS e JavaScript; o build empacota a biblioteca oficial do Supabase. Backups HTML continuam funcionando offline.
+
+## Versão online e segurança
+
+- Produção: https://micahub.vercel.app
+- Login por Google ou e-mail e senha. Confirmação de e-mail desativada temporariamente por decisão do proprietário.
+- Dados em `private.crm_documents`, com RLS forçada e autorização por `auth.uid()`. O schema privado não é exposto na API; apenas `load_crm` e `save_crm` são públicos e exigem sessão autenticada válida.
+- Validação da sessão no banco, bloqueio de usuários banidos/anônimos e exigência de segundo fator quando ativado em **Conta**.
+- Limites por usuário: 120 leituras e 60 gravações por minuto. Login e verificação: 10 solicitações por 5 minutos/IP no Supabase. Tokens de acesso: 15 minutos; detecção de reutilização de refresh tokens ativada.
+- Documento de até 10 MiB por conta, com revisão para impedir sobrescrita silenciosa entre abas. Erros preservam alterações em memória e permitem baixar cópia.
+- O navegador guarda a sessão e o tema; os dados online do CRM são carregados em memória. Aguarde **Salvo na nuvem** antes de fechar. Alterações não sincronizadas não sobrevivem a um encerramento forçado; exporte um backup quando estiver sem conexão.
+- O build publica somente arquivos permitidos em `dist`; a base local, credenciais, testes e backups não são publicados. CSP bloqueia scripts inline; demais cabeçalhos bloqueiam enquadramento e inferência de tipo de arquivo.
+- Apenas a chave **publishable**, própria para uso público, está no frontend. Client Secret do Google fica somente no painel do Supabase.
+
+### Limitações e operação
+
+Sem domínio/remetente SMTP, recuperação de senha por e-mail fica indisponível e não dispara envios. Quando o SMTP for configurado, validar remetente, templates e retorno à produção antes de ativar `emailRecoveryEnabled`. Google continua independente do SMTP.
+
+Sem confirmação de e-mail, o cadastro com senha não comprova a propriedade do endereço. Reativar confirmação assim que o remetente estiver pronto. CAPTCHA e proteção contra senhas vazadas não estão habilitados; a segunda depende da disponibilidade do plano. Rate limiting não substitui esses controles.
+
+Para entrar com Google fora dos usuários de teste, conferir a audiência/publicação do aplicativo no Google Cloud. Manter callback `https://qictnscbhkjcyauucuib.supabase.co/auth/v1/callback` e retorno do app `https://micahub.vercel.app/`.
+
+O armazenamento atual é um documento por usuário para preservar todos os módulos legados. Não é indicado para edição colaborativa ou bases muito grandes. Realizar backups JSON periódicos e planejar recuperação/exportação do banco conforme o plano do Supabase; não há monitoramento externo ou backup agendado configurado por este repositório.
+
+### Desenvolvimento e publicação
+
+```powershell
+npm ci
+npm run build
+npm run dev
+npm test
+npm run test:security
+node tests/security-test.mjs --live
+```
+
+`npm run dev` serve apenas `dist` em `http://127.0.0.1:8000`. O login Google retorna à produção; para desenvolvimento isolado, usar um projeto Supabase separado e allowlist explícita, sem liberar URLs arbitrárias em produção. A Vercel executa `npm run build` e publica `dist` pelo `vercel.json`.
+
+Migrações versionadas em `supabase/migrations` já aplicadas ao projeto MICA Hub. `supabase/config.toml` descreve o ambiente local e não altera sozinho a configuração hospedada. Não reaplicar migrações existentes nem colocar segredos nesse arquivo.
+
+Testes em `supabase/tests/security.sql` usam contas e sessões dentro de uma transação finalizada com `ROLLBACK`: validam RLS, conflitos, rate limits e bloqueio de sessões inválidas, sem criar contas permanentes. A suíte JS usa autenticação simulada; o modo `--live` verifica configurações e bloqueios reais sem cadastrar usuários.
 
 ## Estrutura
 
@@ -28,7 +67,7 @@ O arquivo principal é `index.html`.
 
 ## Como executar
 
-Abra `index.html` diretamente em um navegador moderno. Não é necessário instalar dependências, iniciar servidor ou compilar arquivos.
+Para uso online ou desenvolvimento, siga os comandos acima. O modo offline legado pode ser aberto por `index.html` diretamente em um navegador moderno e não se conecta ao Supabase.
 
 Em uma instalação nova, copie `assets/js/data.example.js` para `assets/js/data.js`. O arquivo `data.js` é local e ignorado pelo Git para que uma base privada de leads nunca seja versionada. A imagem opcional `assets/mica-portrait.webp`, usada na capa das propostas, também permanece somente no computador local.
 
@@ -40,7 +79,9 @@ node tests\smoke-test.mjs
 
 Node.js é utilizado apenas pela suíte de desenvolvimento; não é requisito para usar o CRM.
 
-## Persistência
+## Persistência offline e migração
+
+As informações abaixo se referem exclusivamente ao arquivo aberto com `file://`. Na versão online, não há migração automática da base do navegador para uma conta: entre na conta correta e use **Restaurar JSON** ou **Importar leads** explicitamente. A base local original permanece no computador.
 
 A camada em `assets/js/storage.js` centraliza o acesso ao `localStorage` sem alterar o formato salvo. As chaves existentes foram preservadas:
 
