@@ -354,7 +354,7 @@ try {
   assert("Implementação não perde leads anteriores", await cdp.evaluate(`(() => {const s=window.MicaData.load();return 49+s.extraLeads.length===${leadCountBeforeGoals}})()`));
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   const reportMobile = await cdp.evaluate(`(() => {const nav=document.querySelector('[data-view="relatorios"]'),table=document.querySelector(".report-table-shell");return {nav:getComputedStyle(nav).display,tableWidth:table?.clientWidth,tableScroll:table?.scrollWidth,pageWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>391).slice(0,8).map(el=>({tag:el.tagName,cls:el.className,width:el.getBoundingClientRect().width,right:el.getBoundingClientRect().right}))}})()`);
-  assert("Relatórios permanecem utilizáveis no celular", reportMobile.nav!=="none"&&reportMobile.tableScroll>reportMobile.tableWidth&&reportMobile.pageWidth<=390, JSON.stringify(reportMobile));
+  assert("Relatórios permanecem utilizáveis sem rolagem horizontal no celular", reportMobile.nav!=="none"&&reportMobile.tableScroll<=reportMobile.tableWidth+1&&reportMobile.pageWidth<=390, JSON.stringify(reportMobile));
   await cdp.send("Emulation.clearDeviceMetricsOverride");
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
 
