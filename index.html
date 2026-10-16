@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <title>MICA Hub</title>
   <link rel="icon" type="image/png" href="assets/Logotipo%20M%20com%20Hub%20Azul-Ciano.png">
@@ -12,39 +12,77 @@
   <link rel="stylesheet" href="assets/css/responsive.css">
   <link rel="stylesheet" href="assets/css/theme-light.css">
   <link rel="stylesheet" href="assets/css/auth.css">
+  <link rel="stylesheet" href="assets/css/sidebar.css">
   <script id="estado-salvo" type="application/json">{}</script>
   <script src="assets/js/data.js" defer></script>
   <script src="assets/js/storage.js" defer></script>
   <script src="assets/js/search.js" defer></script>
   <script src="assets/js/proposals.js" defer></script>
+  <script src="assets/js/sidebar.js" defer></script>
   <script src="assets/js/app.js" defer></script>
   <script src="assets/js/supabase-config.js" defer></script>
   <script src="assets/js/cloud.js" defer></script>
 </head>
 <body class="auth-locked">
 <main id="auth-root" hidden aria-live="polite"></main>
-<div class="app-shell">
-  <aside class="sidebar" aria-label="Navegação principal">
-    <button class="brand-mark" data-view="hoje" aria-label="MICA Hub — início">M<span>+</span></button>
-    <nav class="side-nav">
-      <button class="side-link is-active" data-view="hoje" aria-label="Hoje" data-tip="Hoje"><span data-icon="sun"></span></button>
-      <button class="side-link" data-view="pipeline" aria-label="Pipeline" data-tip="Pipeline"><span data-icon="columns"></span></button>
-      <button class="side-link" data-view="leads" aria-label="Leads" data-tip="Leads"><span data-icon="users"></span></button>
-      <button class="side-link" data-view="agenda" aria-label="Agenda" data-tip="Agenda"><span data-icon="calendar"></span></button>
-      <button class="side-link" data-view="dashboard" aria-label="Dashboard" data-tip="Dashboard"><span data-icon="chart"></span></button>
-      <button class="side-link" data-view="relatorios" aria-label="Relatórios por Segmento" data-tip="Relatórios"><span data-icon="target"></span></button>
-      <button class="side-link" data-view="propostas" aria-label="Propostas" data-tip="Propostas"><span data-icon="note"></span></button>
-      <button class="side-link" data-view="catalogo" aria-label="Serviços e Produtos" data-tip="Serviços / Produtos"><span data-icon="columns"></span></button>
-      <button class="side-link" data-view="financeiro" aria-label="Financeiro" data-tip="Financeiro"><span data-icon="dollar"></span></button>
-    </nav>
-    <nav class="side-nav side-nav-bottom">
-      <button class="side-link" data-action="open-data" aria-label="Importar e exportar" data-tip="Importar / Exportar"><span data-icon="database"></span></button>
-      <button class="side-link" data-view="configuracoes" aria-label="Configurações" data-tip="Configurações"><span data-icon="settings"></span></button>
-    </nav>
+<div class="app-shell" data-sidebar-state="expanded" data-mobile-open="false">
+  <button class="sidebar-backdrop" data-sidebar-close tabindex="-1" aria-label="Fechar navegação"></button>
+  <aside id="mica-sidebar" class="sidebar sidebar-v2" aria-label="Navegação principal" tabindex="-1">
+    <div class="sidebar-header">
+      <button class="brand-mark" data-view="hoje" aria-label="MICA Hub — início">M<span>+</span></button>
+      <div class="sidebar-brand sidebar-label"><strong>MICA Hub</strong><span>Seu espaço comercial</span></div>
+      <button class="sidebar-close" data-sidebar-close aria-label="Fechar navegação"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="sidebar-content">
+      <nav class="sidebar-nav-frame" aria-label="Módulos do MICA Hub">
+        <span class="sidebar-indicator" aria-hidden="true"></span>
+        <div class="side-nav sidebar-quick">
+          <button class="side-link" data-sidebar-search aria-label="Buscar leads" title="Buscar leads"><span data-icon="search"></span><span class="sidebar-label">Buscar leads</span><kbd class="sidebar-label">/</kbd></button>
+          <button class="side-link is-active" data-view="hoje" aria-label="Hoje" aria-current="page" title="Hoje"><span data-icon="sun"></span><span class="sidebar-label">Hoje</span></button>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-label sidebar-label">Prospecção</div>
+          <div class="side-nav">
+            <button class="side-link sidebar-group-toggle" data-sidebar-group="crm" aria-label="CRM" aria-expanded="true" aria-controls="sidebar-crm" title="CRM"><span data-icon="users"></span><span class="sidebar-label">CRM</span><svg class="icon sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+            <div class="sidebar-submenu" id="sidebar-crm">
+              <button class="side-link" data-view="leads" aria-label="Leads" title="Leads"><span class="sidebar-sub-dot" aria-hidden="true"></span><span class="sidebar-label">Todos os leads</span></button>
+              <button class="side-link" data-view="pipeline" aria-label="Pipeline" title="Pipeline"><span class="sidebar-sub-dot" aria-hidden="true"></span><span class="sidebar-label">Pipeline</span></button>
+            </div>
+            <button class="side-link" data-view="agenda" aria-label="Agenda" title="Agenda"><span data-icon="calendar"></span><span class="sidebar-label">Agenda</span></button>
+            <button class="side-link" data-view="dashboard" aria-label="Dashboard" title="Dashboard"><span data-icon="chart"></span><span class="sidebar-label">Dashboard</span></button>
+            <button class="side-link" data-view="relatorios" aria-label="Relatórios por Segmento" title="Relatórios por Segmento"><span data-icon="target"></span><span class="sidebar-label">Relatórios por Segmento</span></button>
+          </div>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-label sidebar-label">Negócio</div>
+          <div class="side-nav">
+            <button class="side-link sidebar-group-toggle" data-sidebar-group="documents" aria-label="Documentos" aria-expanded="false" aria-controls="sidebar-documents" title="Documentos"><span data-icon="note"></span><span class="sidebar-label">Documentos</span><svg class="icon sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+            <div class="sidebar-submenu" id="sidebar-documents" hidden>
+              <button class="side-link" data-view="propostas" aria-label="Propostas" title="Propostas"><span class="sidebar-sub-dot" aria-hidden="true"></span><span class="sidebar-label">Propostas</span></button>
+              <button class="side-link" data-view="catalogo" aria-label="Serviços e Produtos" title="Serviços e Produtos"><span class="sidebar-sub-dot" aria-hidden="true"></span><span class="sidebar-label">Serviços / Produtos</span></button>
+            </div>
+            <button class="side-link" data-view="financeiro" aria-label="Financeiro" title="Financeiro"><span data-icon="dollar"></span><span class="sidebar-label">Financeiro</span></button>
+          </div>
+        </div>
+      </nav>
+    </div>
+    <div class="sidebar-footer">
+      <nav class="side-nav side-nav-bottom" aria-label="Dados e preferências">
+        <button class="side-link" data-action="open-data" aria-label="Importar e exportar" title="Importar e exportar"><span data-icon="database"></span><span class="sidebar-label">Importar e exportar</span></button>
+        <button class="side-link" data-view="configuracoes" aria-label="Configurações" title="Configurações"><span data-icon="settings"></span><span class="sidebar-label">Configurações</span></button>
+      </nav>
+      <div id="cloud-account" class="cloud-account sidebar-account" hidden>
+        <button class="sidebar-profile" data-cloud-account aria-label="Minha conta" title="Minha conta"><span class="sidebar-avatar" aria-hidden="true"><span data-icon="users"></span></span><span class="sidebar-profile-copy sidebar-label"><strong>Minha conta</strong><span data-user-email></span></span></button>
+        <button class="sidebar-signout" data-cloud-signout aria-label="Sair da conta" title="Sair da conta"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v16h5M13 8l4 4-4 4M8 12h13"/></svg></button>
+      </div>
+      <div class="sidebar-shortcut sidebar-label"><span>Recolher navegação</span><kbd>Ctrl B</kbd></div>
+    </div>
+    <button class="sidebar-rail" data-sidebar-toggle tabindex="-1" aria-label="Recolher navegação" title="Expandir ou recolher navegação"></button>
   </aside>
 
   <section class="workspace">
     <header class="topbar">
+      <button class="sidebar-trigger" data-sidebar-toggle aria-label="Recolher navegação" aria-expanded="true" aria-controls="mica-sidebar" title="Expandir ou recolher navegação (Ctrl+B)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
       <div class="topbar-title">
         <span class="eyebrow" id="page-eyebrow">COCKPIT COMERCIAL</span>
         <h1 id="page-title">Hoje</h1>
@@ -64,7 +102,6 @@
         <div class="search-suggestions" id="search-suggestions" role="listbox" aria-label="Resultados da pesquisa" hidden></div>
       </div>
       <div class="save-state" id="save-state" aria-live="polite"><i></i><span>Carregando</span></div>
-      <div id="cloud-account" class="cloud-account" hidden><span data-user-email></span><button class="btn btn-sm" data-cloud-account>Conta</button><button class="btn btn-sm" data-cloud-signout>Sair</button></div>
       <button class="icon-btn" data-action="open-data" aria-label="Backup e importação"><span data-icon="database"></span></button>
       <button class="btn btn-primary" data-action="new-lead"><span data-icon="plus"></span>Novo lead</button>
     </header>

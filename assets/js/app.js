@@ -84,6 +84,7 @@ window.NexoCRMApp = function(){
   var Storage = window.NexoStorage;
   var SearchModule = window.NexoSearch;
   var ProposalModule = window.NexoProposals;
+  var sidebar = null;
   var searchEngine = SearchModule.create(), searchDirty = true;
   var state = loadState();
   ui.segmentId=segmentExists(state.lastSegmentId)?state.lastSegmentId:"all";
@@ -273,7 +274,7 @@ window.NexoCRMApp = function(){
   function updateChrome(){
     var titles={hoje:["COCKPIT COMERCIAL","Hoje"],pipeline:["FUNIL DE VENDAS","Pipeline"],leads:["BASE COMERCIAL","Leads"],agenda:["PRÓXIMAS AÇÕES","Agenda"],dashboard:["PERFORMANCE","Dashboard"],relatorios:["ANÁLISE COMERCIAL","Relatórios por Segmento"],propostas:["DOCUMENTOS COMERCIAIS","Propostas"],catalogo:["PORTFÓLIO COMERCIAL","Serviços / Produtos"],financeiro:["GESTÃO FINANCEIRA","Financeiro"],configuracoes:["PREFERÊNCIAS","Configurações"]};
     var t=titles[ui.view]||titles.hoje; document.getElementById("page-eyebrow").textContent=t[0]; document.getElementById("page-title").textContent=t[1];
-    document.querySelectorAll(".side-link[data-view]").forEach(function(b){b.classList.toggle("is-active",b.dataset.view===ui.view);}); renderDayStrip();renderSegmentSwitcher();
+    document.querySelectorAll(".side-link[data-view]").forEach(function(b){b.classList.toggle("is-active",b.dataset.view===ui.view);}); if(sidebar)sidebar.setActive(ui.view); renderDayStrip();renderSegmentSwitcher();
   }
   function renderSegmentSwitcher(){var select=document.getElementById("business-segment-filter");if(select)select.innerHTML=segmentOptions(ui.segmentId,true,false);}
   function render(){
@@ -623,7 +624,7 @@ window.NexoCRMApp = function(){
     var style=doc.createElement("style");style.id="nexo-bundled-styles";style.textContent=css.join("\n");doc.head.appendChild(style);
     var embedded=doc.getElementById("estado-salvo");embedded.textContent=JSON.stringify(packageState()).replace(/</g,"\\u003c");
     var dataScript=doc.createElement("script");dataScript.textContent="window.NEXO_BASE_LEADS="+JSON.stringify(BASE).replace(/</g,"\\u003c")+";";doc.body.appendChild(dataScript);
-    var appScript=doc.createElement("script");appScript.id="app-v2";appScript.textContent="window.createNexoStorage="+window.createNexoStorage.toString()+";window.NexoStorage=window.createNexoStorage();window.createNexoSearch="+window.createNexoSearch.toString()+";window.NexoSearch=window.createNexoSearch();window.createNexoProposalModule="+window.createNexoProposalModule.toString()+";window.NexoProposals=window.createNexoProposalModule();window.NexoCRMApp="+window.NexoCRMApp.toString()+";window.NexoCRMApp();";doc.body.appendChild(appScript);
+    var appScript=doc.createElement("script");appScript.id="app-v2";appScript.textContent="window.createMicaSidebar="+window.createMicaSidebar.toString()+";window.createNexoStorage="+window.createNexoStorage.toString()+";window.NexoStorage=window.createNexoStorage();window.createNexoSearch="+window.createNexoSearch.toString()+";window.NexoSearch=window.createNexoSearch();window.createNexoProposalModule="+window.createNexoProposalModule.toString()+";window.NexoProposals=window.createNexoProposalModule();window.NexoCRMApp="+window.NexoCRMApp.toString()+";window.NexoCRMApp();";doc.body.appendChild(appScript);
     download("mica-hub-"+stamp()+".html","<!DOCTYPE html>\n"+doc.documentElement.outerHTML,"text/html;charset=utf-8");toast("HTML autocontido gerado.");
   }
   function exportCSV(){var head=["Empresa","Tipo de negócio","ID do segmento","Contato","Cargo","Telefone","WhatsApp","E-mail","Cidade","Endereço","CEP","Site","Instagram","Google Maps","Nota","Avaliações","Origem","Score","Etapa","Tentativas","Último contato","Próxima ação","Data próxima ação","Horário próxima ação","Valor proposto","Valor negociado","Valor fechado","Motivo de perda","Anotações"],rows=leads.map(function(l0){var l=getLead(l0.id),r=rec(l.id),n=r.negotiation,a=r.nextAction||{},segmentId=segmentIdFor(l);return [l.nome,segmentName(segmentId),segmentId,r.contact.name||l.contato,r.contact.role||l.cargo,l.telefone,l.whatsapp||r.contact.whatsapp,l.email||r.contact.email,l.cidade,l.endereco,l.cep,l.site,l.instagram,l.perfil,l.nota,l.avaliacoes,l.origem||"Base",scoreFor(l.id).value,stageName(r.stage),r.attempts,r.lastContact,a.type,a.date,a.time,n.proposedValue,n.negotiatedValue,n.closedValue,n.lossReason,r.notes].map(csvCell).join(";");});download("mica-hub-"+stamp()+".csv","\ufeff"+head.map(csvCell).join(";")+"\n"+rows.join("\n"),"text/csv;charset=utf-8");toast("CSV exportado.");}
@@ -748,7 +749,7 @@ window.NexoCRMApp = function(){
 
   function handleSystemThemeChange(){if(themePreference()==="system")applyTheme("system",false);}
   if(THEME_MEDIA.addEventListener)THEME_MEDIA.addEventListener("change",handleSystemThemeChange);else if(THEME_MEDIA.addListener)THEME_MEDIA.addListener(handleSystemThemeChange);
-  applyTheme(themePreference(),false); hydrateIcons(document); setSaveState("saved",state.meta&&state.meta.migratedFrom?"v1 migrado":"Salvo"); render();
+  applyTheme(themePreference(),false); if(window.createMicaSidebar)sidebar=window.createMicaSidebar(); hydrateIcons(document); setSaveState("saved",state.meta&&state.meta.migratedFrom?"v1 migrado":"Salvo"); render();
 };
 
 if(location.protocol==="file:"){document.body.classList.remove("auth-locked");window.NexoCRMApp();}
