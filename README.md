@@ -41,6 +41,8 @@ As migrações existentes não devem ser apagadas ou reaplicadas. `supabase/conf
 
 ## Backup e importação
 
+O botão **Leads**, no topo, reúne cadastro individual, importação, exportação CSV e extração de contatos com filtros. O botão **Backup do Hub**, na sidebar, concentra o backup JSON completo e a restauração, separados das ações de leads.
+
 Continuam disponíveis no aplicativo:
 
 - CSV completo dos leads, com contatos, segmento, score e dados comerciais.

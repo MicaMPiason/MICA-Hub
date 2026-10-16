@@ -65,7 +65,7 @@
     </div>
     <div class="sidebar-footer">
       <nav class="side-nav side-nav-bottom" aria-label="Dados e preferências">
-        <button class="side-link" data-action="open-data" aria-label="Importar e exportar" title="Importar e exportar"><span data-icon="database"></span><span class="sidebar-label">Importar e exportar</span></button>
+        <button class="side-link" data-action="open-backup" aria-label="Backup do Hub" title="Backup do Hub"><span data-icon="database"></span><span class="sidebar-label">Backup do Hub</span></button>
         <button class="side-link" data-view="configuracoes" aria-label="Configurações" title="Configurações"><span data-icon="settings"></span><span class="sidebar-label">Configurações</span></button>
       </nav>
       <div id="cloud-account" class="cloud-account sidebar-account" hidden>
@@ -99,8 +99,16 @@
         <div class="search-suggestions" id="search-suggestions" role="listbox" aria-label="Resultados da pesquisa" hidden></div>
       </div>
       <div class="save-state" id="save-state" aria-live="polite"><i></i><span>Carregando</span></div>
-      <button class="icon-btn" data-action="open-data" aria-label="Backup e importação"><span data-icon="database"></span></button>
-      <button class="btn btn-primary" data-action="new-lead"><span data-icon="plus"></span>Novo lead</button>
+      <div class="lead-actions">
+        <button class="btn btn-primary lead-actions-trigger" id="lead-actions-trigger" data-action="toggle-lead-menu" aria-label="Ações de leads" aria-haspopup="menu" aria-expanded="false" aria-controls="lead-actions-menu"><span data-icon="plus"></span>Leads<svg class="icon lead-actions-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="lead-actions-menu" id="lead-actions-menu" role="menu" aria-labelledby="lead-actions-trigger" hidden>
+          <button type="button" role="menuitem" tabindex="-1" data-action="new-lead"><span data-icon="plus"></span><span>Cadastrar um lead</span></button>
+          <button type="button" role="menuitem" tabindex="-1" data-action="import-leads"><span data-icon="upload"></span><span>Importar leads</span></button>
+          <div class="lead-actions-divider" role="separator"></div>
+          <button type="button" role="menuitem" tabindex="-1" data-action="export-csv"><span data-icon="download"></span><span>Exportar leads (CSV)</span></button>
+          <button type="button" role="menuitem" tabindex="-1" data-action="export-contacts"><span data-icon="phone"></span><span>Extrair contatos com filtros</span></button>
+        </div>
+      </div>
     </header>
 
     <div class="notice" id="notice" hidden role="status"></div>

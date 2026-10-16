@@ -14,10 +14,10 @@ function assert(name, condition, detail = "") {
  results.push({name,ok:Boolean(condition),detail});
  if (!condition) throw new Error(name + (detail ? ": "+detail : ""));
 }
-async function waitForDownload(extension, timeout = 5000) {
+async function waitForDownload(extension, timeout = 5000, matches = () => true) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    const file = readdirSync(downloads).find(name => name.endsWith(extension) && !name.endsWith(".crdownload"));
+    const file = readdirSync(downloads).find(name => name.endsWith(extension) && !name.endsWith(".crdownload") && matches(name));
     if (file) return join(downloads, file);
     await sleep(80);
   }
@@ -207,7 +207,7 @@ try {
   await cdp.evaluate(`document.getElementById("import-confirm-form").requestSubmit()`);
   assert("Selecionar segmento existente na importação XLSX", await waitFor(cdp, `(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Importado XLSX");return lead?.businessSegmentId===seg?.id})()`));
 
-  await cdp.evaluate(`document.querySelector('[data-action="open-data"]').click()`);
+  await cdp.evaluate(`document.querySelector('[data-action="toggle-lead-menu"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-action="import-leads"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-action="import-paste"]').click()`);
   assert("Opção Colar lista abre textarea", await cdp.evaluate(`document.getElementById("paste-import-form") !== null`));
@@ -438,13 +438,13 @@ try {
   const contactsCsv = contactsCsvPath ? readFileSync(contactsCsvPath, "utf8").replace(/^\uFEFF/, "").trim().split(/\r?\n/) : [];
   assert("CSV de contatos contém somente Empresa e Número", contactsCsv.length===2&&contactsCsv[0]==='"Empresa";"Número"'&&contactsCsv[1].split(";").length===2, contactsCsv.join(" | "));
   if (contactsCsvPath) rmSync(contactsCsvPath);
-  await cdp.evaluate(`document.querySelector('[data-action="backup-json"]').click()`);
+  await cdp.evaluate(`document.querySelector('[data-action="open-backup"]').click();document.querySelector('[data-action="backup-json"]').click()`);
   const jsonPath = await waitForDownload(".json");
   assert("Backup JSON funciona", jsonPath && JSON.parse(readFileSync(jsonPath, "utf8")).version === 2);
   assert("Backup JSON inclui todos os leads da conta", jsonPath && JSON.parse(readFileSync(jsonPath, "utf8")).extraLeads.length >= 49);
-  await cdp.evaluate(`document.querySelector('[data-action="export-csv"]').click()`);
-  const csvPath = await waitForDownload(".csv");
-  assert("Exportar CSV funciona", csvPath && readFileSync(csvPath, "utf8").includes("Próxima ação"));
+  await cdp.evaluate(`document.querySelector('[data-modal-close]').click();document.querySelector('[data-action="toggle-lead-menu"]').click();document.querySelector('[data-action="export-csv"]').click()`);
+  const csvPath = await waitForDownload(".csv", 5000, name => !name.startsWith("mica-hub-contatos"));
+  assert("Exportar CSV funciona", csvPath && readFileSync(csvPath, "utf8").includes("Próxima ação"), JSON.stringify({files:readdirSync(downloads),exceptions}));
   assert("Exportação offline foi removida", await cdp.evaluate(`!document.querySelector('[data-action="export-html"]') && !window.NexoStorage && !window.NEXO_BASE_LEADS`));
   assert("Sem erros de execução", exceptions.length === 0, exceptions.join(" | "));
 
