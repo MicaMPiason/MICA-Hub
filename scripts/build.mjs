@@ -12,12 +12,10 @@ await mkdir('dist/assets/js', { recursive: true });
 await cp('assets/css', 'dist/assets/css', { recursive: true });
 await cp('assets/Logotipo M com Hub Azul-Ciano.png', 'dist/assets/Logotipo M com Hub Azul-Ciano.png');
 // Explicit allowlist: never publish private data.js, .env, test fixtures or backups.
-for (const name of ['storage.js', 'search.js', 'proposals.js', 'sidebar.js', 'app.js', 'supabase-config.js', 'theme-init.js']) {
+for (const name of ['search.js', 'proposals.js', 'sidebar.js', 'app.js', 'supabase-config.js', 'theme-init.js']) {
   await cp('assets/js/' + name, 'dist/assets/js/' + name);
 }
 await build({ entryPoints: ['src/cloud.js'], bundle: true, format: 'iife', target: ['es2022'], outfile: 'dist/assets/js/cloud.js', minify: true, legalComments: 'none' });
-await cp('dist/assets/js/cloud.js', 'assets/js/cloud.js');
-const html = (await readFile('index.html', 'utf8')).replace('assets/js/data.js', 'assets/js/data.example.js');
-await cp('assets/js/data.example.js', 'dist/assets/js/data.example.js');
+const html = await readFile('index.html', 'utf8');
 await writeFile('dist/index.html', html);
 console.log('Built dist with Supabase Auth and private per-user storage.');

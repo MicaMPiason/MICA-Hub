@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-const KEY = 'crm_climatizacao_sp_v2';
 let client, userId, started = false, revision = 0, memory = null, pending = null;
 let saving = false, timer, blocked = false, authMode = 'login', authBusy = false;
 let enrollmentId = null, starting = false;
@@ -91,20 +90,17 @@ async function start(session) {
   const data = await rpc('load_crm');
   revision = data.revision;
   memory = data.payload ? JSON.stringify(data.payload) : null;
-  window.NEXO_BASE_LEADS = [];
-  document.getElementById('estado-salvo').textContent = '{}';
   window.MicaCloud = { active: true, flush, get pending() { return !!pending || saving; } };
-  window.NexoStorage = {
-    get(key, fallback) { return key === KEY && memory ? JSON.parse(memory) : fallback; },
-    set(key, value) {
-      if (key !== KEY || blocked) return false;
+  window.MicaData = {
+    load() { return memory ? JSON.parse(memory) : {}; },
+    save(value) {
+      if (blocked) return false;
       memory = JSON.stringify(value);
       pending = memory;
       clearTimeout(timer);
       timer = setTimeout(() => { timer = null; flush(); }, 1500);
       return true;
-    },
-    remove() { return false; }
+    }
   };
   started = true;
   root().hidden = true;
@@ -208,6 +204,7 @@ async function enrollMfa() {
   root().innerHTML = `<section class="auth-card"><h1>Ative a proteção extra</h1><p class="auth-description">Leia o QR code com seu aplicativo autenticador e digite o código de seis dígitos.</p><div class="auth-qr"><img src="${escape(qr)}" alt="QR code para configurar o autenticador"></div><form id="auth-form"><label>Código do autenticador<input class="control" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label><p id="auth-message" class="auth-message" role="status"></p><button class="btn btn-primary btn-wide" type="submit">Confirmar ativação</button></form><button class="btn" data-cloud-return>Cancelar</button></section>`;
 }
 async function boot() {
+  if (!['http:', 'https:'].includes(location.protocol)) throw new Error('O MICA Hub é online. Acesse https://micahub.vercel.app para entrar na sua conta.');
   document.body.classList.add('auth-locked');
   root().hidden = false;
   root().textContent = 'Conectando ao MICA Hub…';
@@ -227,7 +224,6 @@ async function boot() {
     if (event.target.closest('[data-cloud-signout]')) signout().catch(fatal);
     if (event.target.closest('[data-cloud-discard]')) signout(true).catch(fatal);
     if (event.target.closest('[data-cloud-reload]')) location.reload();
-    if (event.target.closest('[data-cloud-retry]')) flush();
     if (event.target.closest('[data-cloud-account]')) showAccount().catch(fatal);
     if (event.target.closest('[data-cloud-enroll]')) enrollMfa().catch(fatal);
     if (event.target.closest('[data-cloud-return]')) { root().hidden = true; root().innerHTML = ''; document.body.classList.remove('auth-locked'); }
@@ -250,5 +246,4 @@ async function boot() {
   addEventListener('beforeunload', event => { if (pending || saving) { event.preventDefault(); event.returnValue = ''; } });
 }
 
-// The hosted app always requires authentication. Offline HTML backups are explicit exports.
-if (location.protocol !== 'file:') boot().catch(error => fatal(error));
+boot().catch(error => fatal(error));

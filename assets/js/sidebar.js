@@ -1,4 +1,4 @@
-// Self-contained so the same navigation also works in an exported offline backup.
+// Navigation controller shared by the authenticated Hub views.
 window.createMicaSidebar = function createMicaSidebar() {
   "use strict";
   var panel = document.getElementById("mica-sidebar");

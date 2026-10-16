@@ -12,8 +12,6 @@ html[data-theme="light"] .icon-btn{color:#697366}
 html[data-theme="light"] .side-link:hover,
 html[data-theme="light"] .icon-btn:hover{background:var(--surface-3);color:var(--ink)}
 html[data-theme="light"] .side-link.is-active{background:#111611;color:#FFF;box-shadow:var(--shadow-sm)}
-html[data-theme="light"] .side-link.is-active:before{background:var(--accent)}
-html[data-theme="light"] .side-link:after{border-color:#242B23;background:#111611;color:#FFF;box-shadow:var(--shadow-sm)}
 
 html[data-theme="light"] .topbar{border-color:var(--line);background:rgba(255,255,255,.88);box-shadow:0 1px 0 rgba(24,35,20,.02)}
 html[data-theme="light"] .day-strip,

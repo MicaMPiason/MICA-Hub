@@ -1,102 +1,19 @@
-import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-
-const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const html = new URL("../index.html", import.meta.url);
-const profile = mkdtempSync(join(tmpdir(), "crm-prospeccao-test-"));
+import { launchBrowser, sleep, waitFor } from "./helpers/browser.mjs";
+import { crmFixture } from "./fixtures/crm.mjs";
+const results = [], exceptions = [];
+const harness = await launchBrowser({ document: crmFixture(), exceptions });
+const { cdp, profile } = harness;
 const downloads = join(profile, "downloads");
-mkdirSync(downloads);
 const proposalPdfDir = join(profile, "pdfs");
 const proposalPdfPath = join(proposalPdfDir, "proposta-qa.pdf");
 const proposalPreviewPath = join(proposalPdfDir, "proposta-preview-qa.png");
-mkdirSync(proposalPdfDir, { recursive: true });
-const port = 9347;
-const browser = spawn(edge, [
-  "--headless=new",
-  "--disable-gpu",
-  "--no-first-run",
-  "--disable-extensions",
-  "--allow-file-access-from-files",
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  html.href
-], { stdio: "ignore", windowsHide: true });
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const results = [];
-const exceptions = [];
-
+mkdirSync(downloads); mkdirSync(proposalPdfDir);
 function assert(name, condition, detail = "") {
-  results.push({ name, ok: Boolean(condition), detail });
-  if (!condition) throw new Error(`${name}${detail ? `: ${detail}` : ""}`);
+ results.push({name,ok:Boolean(condition),detail});
+ if (!condition) throw new Error(name + (detail ? ": "+detail : ""));
 }
-
-async function endpoint() {
-  for (let i = 0; i < 50; i++) {
-    try {
-      const pages = await fetch(`http://127.0.0.1:${port}/json`).then(r => r.json());
-      const page = pages.find(p => p.type === "page");
-      if (page) return page.webSocketDebuggerUrl;
-    } catch {}
-    await sleep(100);
-  }
-  throw new Error("Edge DevTools não iniciou");
-}
-
-class CDP {
-  constructor(url) {
-    this.ws = new WebSocket(url);
-    this.id = 0;
-    this.pending = new Map();
-  }
-  async open() {
-    await new Promise((resolve, reject) => {
-      this.ws.addEventListener("open", resolve, { once: true });
-      this.ws.addEventListener("error", reject, { once: true });
-    });
-    this.ws.addEventListener("message", event => {
-      const msg = JSON.parse(event.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
-      }
-      if (msg.method === "Runtime.exceptionThrown") {
-        exceptions.push(msg.params.exceptionDetails.text || "Runtime exception");
-      }
-    });
-  }
-  send(method, params = {}) {
-    const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-  }
-  async evaluate(expression) {
-    const result = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true
-    });
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-    }
-    return result.result.value;
-  }
-  close() { this.ws.close(); }
-}
-
-async function waitFor(cdp, expression, timeout = 5000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (await cdp.evaluate(expression)) return true;
-    await sleep(80);
-  }
-  return false;
-}
-
 async function waitForDownload(extension, timeout = 5000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -148,22 +65,17 @@ function makeXlsxFixture() {
   return Buffer.concat([...locals, centralBuffer, end]);
 }
 
-let cdp;
 try {
-  cdp = new CDP(await endpoint());
-  await cdp.open();
-  await cdp.send("Runtime.enable");
-  await cdp.send("Page.enable");
   await cdp.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
   assert("CRM abre", await waitFor(cdp, `document.querySelector(".metrics-grid") !== null`));
-  assert("Assets externos carregam", await cdp.evaluate(`window.NEXO_BASE_LEADS?.length === 49 && typeof window.NexoStorage?.get === "function" && typeof window.NexoSearch?.create === "function" && typeof window.NexoProposals?.documentHTML === "function" && [...document.querySelectorAll('link[rel="stylesheet"]')].every(link=>!!link.sheet)`));
+  assert("Assets externos carregam", await cdp.evaluate(`window.MicaData.load().extraLeads.length === 49 && typeof window.MicaData.save === "function" && typeof window.NexoSearch?.create === "function" && typeof window.NexoProposals?.documentHTML === "function" && [...document.querySelectorAll('link[rel="stylesheet"]')].every(link=>!!link.sheet)`));
   assert("Identidade MICA Hub", await cdp.evaluate(`document.title === "MICA Hub" && document.querySelector(".brand-mark")?.getAttribute("aria-label").includes("MICA Hub") && document.querySelector('link[rel="icon"]')?.getAttribute("href").includes("Logotipo%20M%20com%20Hub%20Azul-Ciano.png")`));
   assert("Tema é resolvido antes da aplicação iniciar", await cdp.evaluate(`["light","dark"].includes(document.documentElement.dataset.theme) && document.documentElement.dataset.themePreference === "system"`));
   await cdp.evaluate(`document.querySelector('[data-view="configuracoes"]').click();document.querySelector('[data-theme-choice="light"]').click()`);
   await waitFor(cdp, `getComputedStyle(document.querySelector(".side-link.is-active")).backgroundColor==="rgb(17, 22, 17)"`);
   const lightThemeDebug = await cdp.evaluate(`(() => {const body=getComputedStyle(document.body),side=getComputedStyle(document.querySelector(".sidebar")),active=getComputedStyle(document.querySelector(".side-link.is-active")),value={stored:localStorage.getItem("mica-theme"),theme:document.documentElement.dataset.theme,body:body.backgroundColor,side:side.backgroundColor,active:active.backgroundColor};value.ok=value.stored==="light"&&value.theme==="light"&&value.body==="rgb(244, 246, 241)"&&(value.side.startsWith("rgb(255, 255, 255")||value.side.startsWith("rgba(255, 255, 255"))&&value.active==="rgb(17, 22, 17)";return value})()`);
   assert("Tema claro aplica paleta e navegação previstas", lightThemeDebug.ok, JSON.stringify(lightThemeDebug));
-  await cdp.evaluate(`location.reload()`);
+  await cdp.evaluate(`window.MicaCloud.flush().then(()=>location.reload())`);
   assert("Preferência de tema claro sobrevive ao reload", await waitFor(cdp, `document.readyState==="complete"&&localStorage.getItem("mica-theme")==="light"&&document.documentElement.dataset.theme==="light"&&getComputedStyle(document.body).backgroundColor==="rgb(244, 246, 241)"`,8000));
   await cdp.evaluate(`document.querySelector('[data-view="configuracoes"]').click();document.querySelector('[data-theme-choice="dark"]').click()`);
   assert("Tema escuro original continua disponível", await cdp.evaluate(`localStorage.getItem("mica-theme")==="dark"&&document.documentElement.dataset.theme==="dark"&&getComputedStyle(document.body).backgroundColor==="rgb(9, 10, 9)"`));
@@ -171,13 +83,13 @@ try {
   assert("Tema do sistema pode ser selecionado", await cdp.evaluate(`localStorage.getItem("mica-theme")==="system"&&document.documentElement.dataset.themePreference==="system"&&["light","dark"].includes(document.documentElement.dataset.theme)`));
   await cdp.evaluate(`document.querySelector('[data-theme-choice="light"]').click();document.querySelector('[data-view="hoje"]').click()`);
   assert("49 leads-base aparecem", await cdp.evaluate(`document.body.textContent.includes("49 leads") || document.querySelectorAll(".lead-card").length === 6`));
-  assert("Leads existentes são classificados como Climatização", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Climatização");return !!seg&&s.meta.unclassifiedLeadsMigratedToClimatizacaoAt&&document.querySelector('#business-segment-filter option[value="'+seg.id+'"]')?.textContent.includes("49")})()`));
+  assert("Segmentos existentes são preservados", await cdp.evaluate(`window.MicaData.load().segments.some(x=>x.name==="Climatização") && document.querySelector('#business-segment-filter option[value="seg_test"]')?.textContent.includes("49")`));
   await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="TK";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
   assert("Busca mostra sugestões na tela Hoje", await waitFor(cdp, `!document.getElementById("search-suggestions").hidden&&document.querySelectorAll(".search-suggestion").length>=1`));
-  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="TKfrio";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Sugestões são refinadas enquanto digita", await waitFor(cdp, `document.querySelectorAll(".search-suggestion").length===1&&document.querySelector(".search-suggestion")?.textContent.includes("TKFrio")`));
+  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="TKTeste";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+  assert("Sugestões são refinadas enquanto digita", await waitFor(cdp, `document.querySelectorAll(".search-suggestion").length===1&&document.querySelector(".search-suggestion")?.textContent.includes("TKTeste")`));
   await cdp.evaluate(`document.querySelector(".search-suggestion").click()`);
-  assert("Clicar na sugestão abre a ficha do lead", await waitFor(cdp, `document.getElementById("lead-drawer").classList.contains("is-open")&&document.getElementById("lead-drawer").textContent.includes("TKFrio")`));
+  assert("Clicar na sugestão abre a ficha do lead", await waitFor(cdp, `document.getElementById("lead-drawer").classList.contains("is-open")&&document.getElementById("lead-drawer").textContent.includes("TKTeste")`));
   await cdp.evaluate(`document.querySelector('[data-action="close-drawer"]').click();document.querySelector(".search-clear").click()`);
   assert("Limpar pesquisa fecha as sugestões", await cdp.evaluate(`document.getElementById("global-search").value===""&&document.getElementById("search-suggestions").hidden`));
   await cdp.evaluate(`localStorage.setItem("crm_climatizacao_sp_v1", JSON.stringify({salvoEm:"2026-01-01T00:00:00Z",marcador:"preservar"}))`);
@@ -193,18 +105,18 @@ try {
 
   await cdp.evaluate(`document.querySelector('[data-view="leads"]').click()`);
   assert("Lista mostra 49 leads", await cdp.evaluate(`document.querySelectorAll(".data-table tbody tr").length === 49`));
-  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="MaxClima";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Busca global instantânea", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length === 1 && document.body.textContent.includes("MaxClima")`));
+  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="MaxTeste";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+  assert("Busca global instantânea", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length === 1 && document.body.textContent.includes("MaxTeste")`));
   await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
   await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length === 49`);
   await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="parana";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Busca ignora acentos e maiúsculas", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("Paraná Compressor")`));
-  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="maxclima barueri climatizacao";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Múltiplas palavras encontram campos diferentes", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.querySelector(".data-table tbody tr").textContent.includes("MaxClima")`));
-  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="(11) 98401-5653";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Telefone formatado encontra número normalizado", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("MaxClima")`));
-  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="maxclma";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
-  assert("Busca tolera pequeno erro de digitação", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("MaxClima")`));
+  assert("Busca ignora acentos e maiúsculas", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("Paraná Exemplo")`));
+  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="maxteste barueri climatizacao";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+  assert("Múltiplas palavras encontram campos diferentes", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.querySelector(".data-table tbody tr").textContent.includes("MaxTeste")`));
+  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="(11) 00000-0002";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+  assert("Telefone formatado encontra número normalizado", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("MaxTeste")`));
+  await cdp.evaluate(`(() => {const q=document.getElementById("global-search");q.value="maxtste";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
+  assert("Busca tolera pequeno erro de digitação", await waitFor(cdp, `document.querySelectorAll(".data-table tbody tr").length===1&&document.body.textContent.includes("MaxTeste")`));
   assert("Contador usa singular corretamente", await cdp.evaluate(`document.querySelector(".search-results-meta")?.textContent.includes("1 lead encontrado")&&document.querySelector(".search-clear")?.hidden===false`));
   await cdp.evaluate(`document.querySelector(".search-clear").click()`);
   assert("Limpar busca restaura todos os leads imediatamente", await cdp.evaluate(`document.getElementById("global-search").value===""&&document.querySelectorAll(".data-table tbody tr").length===49&&document.querySelector(".search-clear").hidden===true`));
@@ -224,12 +136,12 @@ try {
   assert("Modal de novo lead abre", await cdp.evaluate(`document.getElementById("new-lead-form") !== null`));
   await cdp.evaluate(`(() => {const f=document.getElementById("new-lead-form");f.elements.businessSegmentId.value="__new__";f.elements.businessSegmentId.dispatchEvent(new Event("change",{bubbles:true}));const values={newSegmentName:"Clínicas",nome:"Teste Automação",contato:"Ana",cargo:"Proprietária",telefone:"11999998888",whatsapp:"11999998888",email:"ana@teste.local",cidade:"São Paulo",endereco:"Rua Teste, 10",site:"",instagram:"",perfil:"",nota:"4.9",avaliacoes:"150",origem:"Teste"};Object.entries(values).forEach(([k,v])=>f.elements[k].value=v);f.requestSubmit();})()`);
   const newLeadOpened = await waitFor(cdp, `document.querySelector(".drawer-title-row h2")?.textContent === "Teste Automação"`);
-  const newLeadDebug = await cdp.evaluate(`({drawer:document.querySelector(".drawer-title-row h2")?.textContent||"",modal:document.querySelector(".modal-head h2")?.textContent||"",toast:document.querySelector(".toast")?.textContent||"",stored:localStorage.getItem("crm_climatizacao_sp_v2")?.includes("Teste Automação")||false})`);
+  const newLeadDebug = await cdp.evaluate(`({drawer:document.querySelector(".drawer-title-row h2")?.textContent||"",modal:document.querySelector(".modal-head h2")?.textContent||"",toast:document.querySelector(".toast")?.textContent||"",stored:JSON.stringify(window.MicaData.load())?.includes("Teste Automação")||false})`);
   assert("Novo lead é criado e aberto", newLeadOpened, JSON.stringify(newLeadDebug));
-  assert("Cadastro manual cria e associa segmento", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return !!seg&&lead.businessSegmentId===seg.id})()`));
+  assert("Cadastro manual cria e associa segmento", await cdp.evaluate(`(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return !!seg&&lead.businessSegmentId===seg.id})()`));
   await cdp.evaluate(`(() => {const e=document.querySelector('[data-record="notes"]');e.value="Lead editado no teste";e.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   await sleep(250);
-  assert("Editar lead persiste", await cdp.evaluate(`localStorage.getItem("crm_climatizacao_sp_v2").includes("Lead editado no teste")`));
+  assert("Editar lead persiste", await cdp.evaluate(`JSON.stringify(window.MicaData.load()).includes("Lead editado no teste")`));
   await cdp.evaluate(`window.__waUrl="";window.open=(url)=>{window.__waUrl=url};document.querySelector('[data-action="whatsapp"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-wa-template="primeiro"]').click()`);
   assert("WhatsApp abre wa.me com template", await cdp.evaluate(`window.__waUrl.startsWith("https://wa.me/5511999998888?text=") && decodeURIComponent(window.__waUrl).includes("Teste Automação") && decodeURIComponent(window.__waUrl).includes("Vendedor")`));
@@ -252,22 +164,22 @@ try {
   await cdp.evaluate(`(() => {document.querySelector('[data-view="leads"]').click();const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação"));const s=row.querySelector("select");s.value="perdido";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   assert("Mover para perdido solicita motivo", await cdp.evaluate(`document.getElementById("loss-form") !== null`));
   await cdp.evaluate(`(() => {const f=document.getElementById("loss-form");f.elements.reason.value="Preço";f.elements.note.value="Teste de perda";document.querySelector('button[form="loss-form"]').click()})()`);
-  const lossSaved = await waitFor(cdp, `!document.getElementById("loss-form") && (()=>{const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="perdido"&&s.records[l.id].negotiation.lossReason==="Preço"})()`);
-  const lossDebug = await cdp.evaluate(`(() => {const f=document.getElementById("loss-form"),b=document.querySelector('button[form="loss-form"]'),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return {form:!!f,valid:f?.checkValidity(),reason:f?.elements.reason?.value,formId:f?.id,buttonForm:b?.form?.id,stage:s.records[l.id].stage,toast:document.querySelector(".toast")?.textContent||""}})()`);
+  const lossSaved = await waitFor(cdp, `!document.getElementById("loss-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="perdido"&&s.records[l.id].negotiation.lossReason==="Preço"})()`);
+  const lossDebug = await cdp.evaluate(`(() => {const f=document.getElementById("loss-form"),b=document.querySelector('button[form="loss-form"]'),s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return {form:!!f,valid:f?.checkValidity(),reason:f?.elements.reason?.value,formId:f?.id,buttonForm:b?.form?.id,stage:s.records[l.id].stage,toast:document.querySelector(".toast")?.textContent||""}})()`);
   assert("Motivo de perda é salvo", lossSaved, JSON.stringify(lossDebug));
 
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação"));const s=row.querySelector("select");s.value="fechado";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   assert("Fechado solicita valor", await cdp.evaluate(`document.getElementById("close-form") !== null`));
   await cdp.evaluate(`(() => {const f=document.getElementById("close-form");f.elements.value.value="1500";f.elements.note.value="Fechamento automático";document.querySelector('button[form="close-form"]').click()})()`);
-  assert("Fechamento é registrado", await waitFor(cdp, `!document.getElementById("close-form") && (()=>{const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="fechado"})()`));
+  assert("Fechamento é registrado", await waitFor(cdp, `!document.getElementById("close-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="fechado"})()`));
   await sleep(300);
-  const closedRecord = await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return l&&s.records[l.id]})()`);
+  const closedRecord = await cdp.evaluate(`(() => {const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return l&&s.records[l.id]})()`);
   assert("Valor fechado persiste", closedRecord?.stage === "fechado" && Number(closedRecord?.negotiation?.closedValue) === 1500, JSON.stringify(closedRecord));
-  assert("Venda fechada gera receita financeira automática", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),x=s.financial.transactions.find(x=>x.source==="closed_deal"&&x.leadId===l.id);return x?.type==="income"&&x?.category==="Venda"&&x?.amount===1500&&x?.description.includes("Teste Automação")&&x?.notes.includes("Fechamento automático")})()`));
+  assert("Venda fechada gera receita financeira automática", await cdp.evaluate(`(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),x=s.financial.transactions.find(x=>x.source==="closed_deal"&&x.leadId===l.id);return x?.type==="income"&&x?.category==="Venda"&&x?.amount===1500&&x?.description.includes("Teste Automação")&&x?.notes.includes("Fechamento automático")})()`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="negociacao";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Retirar de Fechado remove a receita automática", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return !s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
+  assert("Retirar de Fechado remove a receita automática", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return !s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
   await cdp.evaluate(`(() => {const updated=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")).querySelector("select");updated.value="fechado";updated.dispatchEvent(new Event("change",{bubbles:true}));const f=document.getElementById("close-form");f.elements.value.value="1500";f.requestSubmit()})()`);
-  assert("Reconfirmar a mesma venda não duplica a receita", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.financial.transactions.filter(x=>x.source==="closed_deal"&&x.leadId===l.id).length===1})()`));
+  assert("Reconfirmar a mesma venda não duplica a receita", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.financial.transactions.filter(x=>x.source==="closed_deal"&&x.leadId===l.id).length===1})()`));
 
   await cdp.evaluate(`(() => {const csv="company_name;phone;email_address;city\\nImportado CSV;11911112222;csv@nexo.local;Osasco\\nDuplicado CSV;11999998888;duplicado@nexo.local;São Paulo";const file=new File([csv],"teste-colunas-variadas.csv",{type:"text/csv"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-spreadsheet");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
   assert("CSV com colunas diferentes abre mapeamento", await waitFor(cdp, `document.getElementById("import-mapping-form") !== null`));
@@ -275,25 +187,25 @@ try {
   await cdp.evaluate(`document.querySelector('button[form="import-mapping-form"]').click()`);
   assert("Importação exige tipo de negócio", await waitFor(cdp, `document.getElementById("import-segment-form") !== null && document.body.textContent.includes("A qual tipo de negócio")`));
   await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form");f.elements.businessSegmentId.value="__new__";f.elements.businessSegmentId.dispatchEvent(new Event("change",{bubbles:true}));f.elements.newSegmentName.value="Instaladores de Ar";f.requestSubmit();})()`);
-  assert("Criar segmento durante importação", await waitFor(cdp, `document.getElementById("import-confirm-form") !== null && JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).segments.some(x=>x.name==="Instaladores de Ar")`));
+  assert("Criar segmento durante importação", await waitFor(cdp, `document.getElementById("import-confirm-form") !== null && window.MicaData.load().segments.some(x=>x.name==="Instaladores de Ar")`));
   assert("Preview detecta duplicados", await cdp.evaluate(`document.querySelector(".import-summary")?.textContent.includes("2") && document.querySelector(".import-summary")?.textContent.includes("1") && document.querySelector('[data-import-policy]')?.value==="ignore"`));
   assert("Preview oferece importar mesmo assim", await cdp.evaluate(`document.querySelector('[data-import-policy] option[value="all"]') !== null`));
   await cdp.evaluate(`document.getElementById("import-confirm-form").requestSubmit()`);
-  assert("Importação CSV salva apenas novos por padrão", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));return s.extraLeads.some(x=>x.nome==="Importado CSV")&&!s.extraLeads.some(x=>x.nome==="Duplicado CSV")})()`));
+  assert("Importação CSV salva apenas novos por padrão", await waitFor(cdp, `(() => {const s=window.MicaData.load();return s.extraLeads.some(x=>x.nome==="Importado CSV")&&!s.extraLeads.some(x=>x.nome==="Duplicado CSV")})()`));
   await cdp.evaluate(`(() => {const csv="Empresa;Telefone;Email\\nDuplicado Permitido;11999998888;permitido@nexo.local";const file=new File([csv],"duplicado.csv",{type:"text/csv"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-spreadsheet");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
   await cdp.evaluate(`document.getElementById("import-mapping-form").requestSubmit()`);
-  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit()})()`);
+  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit()})()`);
   await cdp.evaluate(`(() => {const select=document.querySelector('[data-import-policy]');select.value="all";select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   assert("Duplicados podem ser importados por escolha explícita", await cdp.evaluate(`document.getElementById("confirm-import").textContent.includes("1")`));
   await cdp.evaluate(`document.getElementById("import-confirm-form").requestSubmit()`);
-  assert("Importar mesmo assim preserva o duplicado", await waitFor(cdp, `JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).extraLeads.some(x=>x.nome==="Duplicado Permitido")`));
+  assert("Importar mesmo assim preserva o duplicado", await waitFor(cdp, `window.MicaData.load().extraLeads.some(x=>x.nome==="Duplicado Permitido")`));
   const xlsxBase64 = makeXlsxFixture().toString("base64");
   await cdp.evaluate(`(() => {const bytes=Uint8Array.from(atob("${xlsxBase64}"),c=>c.charCodeAt(0));const file=new File([bytes],"teste.xlsx",{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-spreadsheet");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
   assert("Importação XLSX mantém fluxo de mapeamento", await waitFor(cdp, `document.getElementById("import-mapping-form") !== null`));
   await cdp.evaluate(`document.querySelector('button[form="import-mapping-form"]').click()`);
-  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Clínicas");f.elements.businessSegmentId.value=seg.id;f.requestSubmit();})()`);
+  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas");f.elements.businessSegmentId.value=seg.id;f.requestSubmit();})()`);
   await cdp.evaluate(`document.getElementById("import-confirm-form").requestSubmit()`);
-  assert("Selecionar segmento existente na importação XLSX", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Importado XLSX");return lead?.businessSegmentId===seg?.id})()`));
+  assert("Selecionar segmento existente na importação XLSX", await waitFor(cdp, `(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Importado XLSX");return lead?.businessSegmentId===seg?.id})()`));
 
   await cdp.evaluate(`document.querySelector('[data-action="open-data"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-action="import-leads"]').click()`);
@@ -302,14 +214,14 @@ try {
   await cdp.evaluate(`(() => {const f=document.getElementById("paste-import-form");f.elements.content.value="Lista A;11933334444;lista-a@nexo.local\\nLista B;11944445555;lista-b@nexo.local";f.requestSubmit();})()`);
   assert("Lista sem cabeçalho recebe mapeamento sugerido", await waitFor(cdp, `document.getElementById("import-mapping-form") !== null && document.querySelector('[name="col_0"]')?.value==="nome" && document.querySelector('[name="col_1"]')?.value==="telefone"`));
   await cdp.evaluate(`document.querySelector('button[form="import-mapping-form"]').click()`);
-  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit();})()`);
+  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit();})()`);
   await cdp.evaluate(`document.getElementById("import-confirm-form").requestSubmit()`);
-  assert("Importação por lista colada funciona", await waitFor(cdp, `localStorage.getItem("crm_climatizacao_sp_v2").includes("Lista A") && localStorage.getItem("crm_climatizacao_sp_v2").includes("Lista B")`));
+  assert("Importação por lista colada funciona", await waitFor(cdp, `JSON.stringify(window.MicaData.load()).includes("Lista A") && JSON.stringify(window.MicaData.load()).includes("Lista B")`));
 
   await cdp.evaluate(`(() => {const rows=["company_name;phone;email_address"];for(let i=0;i<5000;i++)rows.push("Lead Volume "+i+";11"+String(700000000+i).padStart(9,"0")+";volume"+i+"@nexo.local");const file=new File([rows.join("\\n")],"volume-5000.csv",{type:"text/csv"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-spreadsheet");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
   assert("Arquivo com 5.000 leads é lido sem travar", await waitFor(cdp, `document.getElementById("import-mapping-form")?.textContent.includes("Lead Volume 0")`, 10000));
   await cdp.evaluate(`document.getElementById("import-mapping-form").requestSubmit()`);
-  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit()})()`);
+  await cdp.evaluate(`(() => {const f=document.getElementById("import-segment-form"),s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.businessSegmentId.value=seg.id;f.requestSubmit()})()`);
   assert("Preview processa 5.000 leads sem renderização integral", await waitFor(cdp, `document.querySelector(".import-summary")?.textContent.includes("5000") && document.querySelectorAll(".import-preview tbody tr").length===10`, 10000));
   await cdp.evaluate(`document.querySelector("[data-modal-close]").click()`);
 
@@ -323,54 +235,54 @@ try {
   await sleep(300);
 
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Importado CSV"));row.click()})()`);
-  await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Clínicas"),select=document.querySelector('[data-profile="businessSegmentId"]');select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Edição altera o segmento de apenas um lead", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Importado CSV");return s.records[lead.id].profile.businessSegmentId===seg.id && !s.extraLeads.find(x=>x.nome==="Lista A").businessSegmentId.includes(seg.id)})()`));
+  await cdp.evaluate(`(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas"),select=document.querySelector('[data-profile="businessSegmentId"]');select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
+  assert("Edição altera o segmento de apenas um lead", await waitFor(cdp, `(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Clínicas"),lead=s.extraLeads.find(x=>x.nome==="Importado CSV");return s.records[lead.id].profile.businessSegmentId===seg.id && !s.extraLeads.find(x=>x.nome==="Lista A").businessSegmentId.includes(seg.id)})()`));
   await cdp.evaluate(`document.querySelector('[data-action="close-drawer"]').click();document.querySelector('[data-view="configuracoes"]').click()`);
 
   await cdp.evaluate(`document.querySelector('[data-action="create-segment"]').click()`);
   await cdp.evaluate(`(() => {const f=document.getElementById("segment-create-form");f.elements.name.value="Segmento Vazio";f.requestSubmit()})()`);
-  assert("Gerenciamento cria segmento", await waitFor(cdp, `JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).segments.some(x=>x.name==="Segmento Vazio")`));
+  assert("Gerenciamento cria segmento", await waitFor(cdp, `window.MicaData.load().segments.some(x=>x.name==="Segmento Vazio")`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll(".segment-row")].find(x=>x.textContent.includes("Segmento Vazio"));row.querySelector('[data-action="delete-segment"]').click()})()`);
   assert("Excluir segmento vazio solicita confirmação", await cdp.evaluate(`document.getElementById("segment-delete-form") !== null && document.querySelector('[name="moveTo"]') === null`));
   await cdp.evaluate(`document.getElementById("segment-delete-form").requestSubmit()`);
-  assert("Segmento vazio é excluído", await waitFor(cdp, `!JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).segments.some(x=>x.name==="Segmento Vazio")`));
+  assert("Segmento vazio é excluído", await waitFor(cdp, `!window.MicaData.load().segments.some(x=>x.name==="Segmento Vazio")`));
 
-  const clinicsId = await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).segments.find(x=>x.name==="Clínicas").id`);
+  const clinicsId = await cdp.evaluate(`window.MicaData.load().segments.find(x=>x.name==="Clínicas").id`);
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll(".segment-row")].find(x=>x.textContent.includes("Clínicas"));row.querySelector('[data-action="rename-segment"]').click()})()`);
   await cdp.evaluate(`(() => {const f=document.getElementById("segment-rename-form");f.elements.name.value="Consultórios Médicos";f.requestSubmit()})()`);
-  assert("Renomear preserva o ID e associações", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Consultórios Médicos"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return seg?.id==="${clinicsId}"&&lead.businessSegmentId===seg.id})()`));
-  const countBeforeSegmentDelete = await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).extraLeads.length`);
+  assert("Renomear preserva o ID e associações", await waitFor(cdp, `(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Consultórios Médicos"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return seg?.id==="${clinicsId}"&&lead.businessSegmentId===seg.id})()`));
+  const countBeforeSegmentDelete = await cdp.evaluate(`window.MicaData.load().extraLeads.length`);
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll(".segment-row")].find(x=>x.textContent.includes("Consultórios Médicos"));row.querySelector('[data-action="delete-segment"]').click()})()`);
   assert("Excluir segmento com leads exige destino", await cdp.evaluate(`document.getElementById("segment-delete-form") !== null && document.querySelector('[name="moveTo"]') !== null && document.body.textContent.includes("Nenhum lead será apagado")`));
-  await cdp.evaluate(`(() => {const f=document.getElementById("segment-delete-form"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),target=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.moveTo.value=target.id;f.requestSubmit()})()`);
-  assert("Excluir segmento move leads sem perda", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),target=s.segments.find(x=>x.name==="Instaladores de Ar"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return !s.segments.some(x=>x.id==="${clinicsId}")&&s.extraLeads.length===${countBeforeSegmentDelete}&&s.records[lead.id].profile.businessSegmentId===target.id})()`));
+  await cdp.evaluate(`(() => {const f=document.getElementById("segment-delete-form"),s=window.MicaData.load(),target=s.segments.find(x=>x.name==="Instaladores de Ar");f.elements.moveTo.value=target.id;f.requestSubmit()})()`);
+  assert("Excluir segmento move leads sem perda", await waitFor(cdp, `(() => {const s=window.MicaData.load(),target=s.segments.find(x=>x.name==="Instaladores de Ar"),lead=s.extraLeads.find(x=>x.nome==="Teste Automação");return !s.segments.some(x=>x.id==="${clinicsId}")&&s.extraLeads.length===${countBeforeSegmentDelete}&&s.records[lead.id].profile.businessSegmentId===target.id})()`));
 
   await cdp.evaluate(`document.querySelector('[data-view="financeiro"]').click()`);
   assert("Módulo financeiro integra a navegação", await cdp.evaluate(`document.getElementById("page-title").textContent==="Financeiro" && document.querySelector(".financial-metrics") !== null`));
-  assert("Estado financeiro nasce no armazenamento v2", await cdp.evaluate(`(() => {const f=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial;return Array.isArray(f.transactions)&&Array.isArray(f.categories.income)&&Array.isArray(f.categories.expense)})()`));
-  assert("Categorias financeiras iniciais estão disponíveis", await cdp.evaluate(`(() => {const f=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial;return ["Venda","Serviço","Mensalidade","Projeto","Comissão","Outros"].every(x=>f.categories.income.includes(x))&&["Hospedagem","Domínio","Software","Marketing","Equipamentos","Transporte","Impostos","Taxas","Outros"].every(x=>f.categories.expense.includes(x))})()`));
+  assert("Estado financeiro nasce no armazenamento v2", await cdp.evaluate(`(() => {const f=window.MicaData.load().financial;return Array.isArray(f.transactions)&&Array.isArray(f.categories.income)&&Array.isArray(f.categories.expense)})()`));
+  assert("Categorias financeiras iniciais estão disponíveis", await cdp.evaluate(`(() => {const f=window.MicaData.load().financial;return ["Venda","Serviço","Mensalidade","Projeto","Comissão","Outros"].every(x=>f.categories.income.includes(x))&&["Hospedagem","Domínio","Software","Marketing","Equipamentos","Transporte","Impostos","Taxas","Outros"].every(x=>f.categories.expense.includes(x))})()`));
   await cdp.evaluate(`(() => {const q=document.getElementById("financial-search");q.value="sem resultado possível";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
   assert("Estado vazio financeiro é claro", await cdp.evaluate(`document.querySelector(".financial-list .empty-state")?.textContent.includes("Nenhuma movimentação")`));
   await cdp.evaluate(`(() => {const q=document.getElementById("financial-search");q.value="";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
   await cdp.evaluate(`document.querySelector('[data-action="new-financial"]').click()`);
   assert("Modal de lançamento abre", await cdp.evaluate(`document.getElementById("financial-transaction-form") !== null`));
   await cdp.evaluate(`(() => {const f=document.getElementById("financial-transaction-form");f.elements.type.value="income";f.elements.category.value="Venda";f.elements.amount.value="1000.50";f.elements.date.value=new Date().toISOString().slice(0,10);f.elements.description.value="Receita de projeto Alpha";f.elements.notes.value="Pagamento confirmado";f.requestSubmit()})()`);
-  assert("Receita é criada com modelo completo", await waitFor(cdp, `(() => {const x=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.find(x=>x.description==="Receita de projeto Alpha");return x&&x.id&&x.type==="income"&&x.category==="Venda"&&x.amount===1000.5&&x.date&&x.notes==="Pagamento confirmado"&&x.createdAt&&x.updatedAt})()`));
+  assert("Receita é criada com modelo completo", await waitFor(cdp, `(() => {const x=window.MicaData.load().financial.transactions.find(x=>x.description==="Receita de projeto Alpha");return x&&x.id&&x.type==="income"&&x.category==="Venda"&&x.amount===1000.5&&x.date&&x.notes==="Pagamento confirmado"&&x.createdAt&&x.updatedAt})()`));
   await cdp.evaluate(`document.querySelector('[data-action="new-financial"]').click()`);
   await cdp.evaluate(`(() => {const f=document.getElementById("financial-transaction-form");f.elements.type.value="expense";f.elements.type.dispatchEvent(new Event("change",{bubbles:true}));f.elements.category.value="Software";f.elements.amount.value="250.25";f.elements.date.value=new Date().toISOString().slice(0,10);f.elements.description.value="Licença de software";f.elements.notes.value="Assinatura mensal";f.requestSubmit()})()`);
-  assert("Despesa é criada e armazenada como número", await waitFor(cdp, `(() => {const x=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.find(x=>x.description==="Licença de software");return x?.type==="expense"&&x?.amount===250.25})()`));
+  assert("Despesa é criada e armazenada como número", await waitFor(cdp, `(() => {const x=window.MicaData.load().financial.transactions.find(x=>x.description==="Licença de software");return x?.type==="expense"&&x?.amount===250.25})()`));
   assert("Indicadores calculam receitas, despesas e resultado", await cdp.evaluate(`(() => {const cards=[...document.querySelectorAll(".financial-metrics .metric-card strong")].map(x=>x.textContent);return cards[0].includes("2.250,25")&&cards[1].includes("2.500,50")&&cards[2].includes("250,25")&&cards[3].includes("2.250,25")})()`));
   assert("Valores usam formato monetário brasileiro", await cdp.evaluate(`[...document.querySelectorAll(".finance-value")].every(x=>x.textContent.includes("R$")&&x.textContent.includes(","))`));
   assert("Gráfico usa dados reais de receitas e despesas", await cdp.evaluate(`document.querySelectorAll(".finance-chart-bars i").length===2 && document.querySelector(".finance-chart-bars .income").title.includes("2.500,50") && document.querySelector(".finance-chart-bars .expense").title.includes("250,25")`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("[data-financial-id]")].find(x=>x.textContent.includes("Receita de projeto Alpha"));row.querySelector('[data-action="edit-financial"]').click()})()`);
   assert("Editar lançamento abre dados existentes", await cdp.evaluate(`document.getElementById("financial-transaction-form").elements.amount.value==="1000.5"`));
   await cdp.evaluate(`(() => {const f=document.getElementById("financial-transaction-form");f.elements.amount.value="1200.75";f.elements.description.value="Receita Alpha editada";f.requestSubmit()})()`);
-  assert("Edição financeira persiste sem duplicar", await waitFor(cdp, `(() => {const xs=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions;return xs.length===3&&xs.some(x=>x.description==="Receita Alpha editada"&&x.amount===1200.75&&x.updatedAt>=x.createdAt)})()`));
+  assert("Edição financeira persiste sem duplicar", await waitFor(cdp, `(() => {const xs=window.MicaData.load().financial.transactions;return xs.length===3&&xs.some(x=>x.description==="Receita Alpha editada"&&x.amount===1200.75&&x.updatedAt>=x.createdAt)})()`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("[data-financial-id]")].find(x=>x.textContent.includes("Licença de software"));row.querySelector('[data-action="edit-financial"]').click();const f=document.getElementById("financial-transaction-form");f.elements.amount.value="300.25";f.elements.notes.value="Despesa editada";f.requestSubmit()})()`);
-  assert("Edição de despesa atualiza valores em tempo real", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),x=s.financial.transactions.find(x=>x.description==="Licença de software");return x?.amount===300.25&&x?.notes==="Despesa editada"&&document.querySelector(".financial-metrics").textContent.includes("2.400,50")})()`));
+  assert("Edição de despesa atualiza valores em tempo real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),x=s.financial.transactions.find(x=>x.description==="Licença de software");return x?.amount===300.25&&x?.notes==="Despesa editada"&&document.querySelector(".financial-metrics").textContent.includes("2.400,50")})()`));
   await cdp.evaluate(`document.querySelector('[data-action="new-financial"]').click()`);
   await cdp.evaluate(`(() => {const f=document.getElementById("financial-transaction-form");f.elements.type.value="expense";f.elements.type.dispatchEvent(new Event("change",{bubbles:true}));f.elements.category.value="__new__";f.elements.category.dispatchEvent(new Event("change",{bubbles:true}));f.elements.newCategory.value="Treinamento";f.elements.amount.value="80";const d=new Date();d.setMonth(d.getMonth()-1);f.elements.date.value=d.toISOString().slice(0,10);f.elements.description.value="Curso anterior";f.requestSubmit()})()`);
-  assert("Categoria personalizada é criada e preservada", await waitFor(cdp, `(() => {const f=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial;return f.categories.expense.includes("Treinamento")&&f.transactions.some(x=>x.category==="Treinamento")})()`));
+  assert("Categoria personalizada é criada e preservada", await waitFor(cdp, `(() => {const f=window.MicaData.load().financial;return f.categories.expense.includes("Treinamento")&&f.transactions.some(x=>x.category==="Treinamento")})()`));
   await cdp.evaluate(`(() => {const q=document.getElementById("financial-search");q.value="despesa editada";q.dispatchEvent(new Event("input",{bubbles:true}))})()`);
   assert("Busca financeira pesquisa observações", await cdp.evaluate(`document.querySelectorAll("[data-financial-id]").length===1 && document.body.textContent.includes("Licença de software")`));
   await cdp.evaluate(`(() => {const q=document.getElementById("financial-search");q.value="";q.dispatchEvent(new Event("input",{bubbles:true}));const t=document.querySelector('[data-financial-filter="financialType"]');t.value="expense";t.dispatchEvent(new Event("change",{bubbles:true}))})()`);
@@ -392,41 +304,41 @@ try {
   await cdp.evaluate(`(() => {const p=document.querySelector('[data-financial-filter="financialPeriod"]');p.value="all";p.dispatchEvent(new Event("change",{bubbles:true}));const row=[...document.querySelectorAll("[data-financial-id]")].find(x=>x.textContent.includes("Curso anterior"));row.querySelector('[data-action="delete-financial"]').click()})()`);
   assert("Exclusão solicita confirmação", await cdp.evaluate(`document.getElementById("financial-delete-form") !== null`));
   await cdp.evaluate(`document.querySelector('[data-modal-close]').click()`);
-  assert("Cancelar exclusão preserva lançamento", await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.some(x=>x.description==="Curso anterior")`));
+  assert("Cancelar exclusão preserva lançamento", await cdp.evaluate(`window.MicaData.load().financial.transactions.some(x=>x.description==="Curso anterior")`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("[data-financial-id]")].find(x=>x.textContent.includes("Curso anterior"));row.querySelector('[data-action="delete-financial"]').click();document.getElementById("financial-delete-form").requestSubmit()})()`);
-  assert("Confirmar exclusão remove lançamento", await waitFor(cdp, `!JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.some(x=>x.description==="Curso anterior")`));
-  assert("Exclusão atualiza totais e gráfico", await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.length===3 && document.querySelectorAll(".finance-chart-bars i").length>=2`));
+  assert("Confirmar exclusão remove lançamento", await waitFor(cdp, `!window.MicaData.load().financial.transactions.some(x=>x.description==="Curso anterior")`));
+  assert("Exclusão atualiza totais e gráfico", await cdp.evaluate(`window.MicaData.load().financial.transactions.length===3 && document.querySelectorAll(".finance-chart-bars i").length>=2`));
   await cdp.evaluate(`(()=>{const t=document.querySelector('[data-financial-filter="financialType"]');t.value="all";t.dispatchEvent(new Event("change",{bubbles:true}));document.querySelector('[data-action="new-financial"]').click();const f=document.getElementById("financial-transaction-form");f.elements.amount.value="10";f.elements.date.value=new Date().toISOString().slice(0,10);f.elements.description.value="Receita temporária";f.requestSubmit();const row=[...document.querySelectorAll("[data-financial-id]")].find(x=>x.textContent.includes("Receita temporária"));row.querySelector('[data-action="delete-financial"]').click();document.getElementById("financial-delete-form").requestSubmit()})()`);
-  assert("Receita também pode ser excluída", await waitFor(cdp, `!JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).financial.transactions.some(x=>x.description==="Receita temporária")`));
-  await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),tx=s.financial.transactions.map(x=>({id:x.id,tipo:x.type==="expense"?"despesa":"receita",categoria:x.category,valor:x.amount,data:x.date,descricao:x.description,observacoes:x.notes,criadoEm:x.createdAt,atualizadoEm:x.updatedAt}));tx.push({id:"fin_legado",tipo:"receita",categoria:"Serviço",valor:99.9,data:new Date().toISOString().slice(0,10),descricao:"Lançamento financeiro legado",observacoes:"Migrado"});s.financeiro={movimentacoes:tx,categorias:{receitas:["Consultoria"],despesas:["Treinamento"]}};delete s.financial;localStorage.setItem("crm_climatizacao_sp_v2",JSON.stringify(s));location.reload()})()`);
-  assert("Estrutura financeira antiga é migrada sem perdas", await waitFor(cdp, `(() => {const f=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"))?.financial;return f?.transactions.some(x=>x.id==="fin_legado"&&x.type==="income"&&x.amount===99.9)&&f.transactions.some(x=>x.description==="Receita Alpha editada")&&f.categories.income.includes("Consultoria")&&f.categories.expense.includes("Treinamento")})()`, 8000));
+  assert("Receita também pode ser excluída", await waitFor(cdp, `!window.MicaData.load().financial.transactions.some(x=>x.description==="Receita temporária")`));
+  await cdp.evaluate(`(() => {const s=window.MicaData.load(),tx=s.financial.transactions.map(x=>({id:x.id,tipo:x.type==="expense"?"despesa":"receita",categoria:x.category,valor:x.amount,data:x.date,descricao:x.description,observacoes:x.notes,criadoEm:x.createdAt,atualizadoEm:x.updatedAt}));tx.push({id:"fin_legado",tipo:"receita",categoria:"Serviço",valor:99.9,data:new Date().toISOString().slice(0,10),descricao:"Lançamento financeiro legado",observacoes:"Migrado"});s.financeiro={movimentacoes:tx,categorias:{receitas:["Consultoria"],despesas:["Treinamento"]}};delete s.financial;window.MicaData.save(s);window.MicaCloud.flush().then(()=>location.reload())})()`);
+  assert("Estrutura financeira antiga é migrada sem perdas", await waitFor(cdp, `(() => {const f=window.MicaData.load()?.financial;return f?.transactions.some(x=>x.id==="fin_legado"&&x.type==="income"&&x.amount===99.9)&&f.transactions.some(x=>x.description==="Receita Alpha editada")&&f.categories.income.includes("Consultoria")&&f.categories.expense.includes("Treinamento")})()`, 8000));
   await cdp.evaluate(`document.querySelector('[data-view="financeiro"]').click()`);
   assert("Persistência financeira sobrevive ao reload", await cdp.evaluate(`document.body.textContent.includes("Receita Alpha editada") && document.body.textContent.includes("Lançamento financeiro legado")`));
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert("Financeiro permanece utilizável em viewport móvel", await cdp.evaluate(`(() => {const nav=document.querySelector('[data-view="financeiro"]'),table=document.querySelector(".financial-table-shell"),root=document.documentElement;return getComputedStyle(nav).display!=="none"&&table&&table.scrollWidth>=table.clientWidth&&root.scrollWidth<=390})()`));
   await cdp.send("Emulation.clearDeviceMetricsOverride");
 
-  const leadCountBeforeGoals = await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));return 49+s.extraLeads.length})()`);
+  const leadCountBeforeGoals = await cdp.evaluate(`(() => {const s=window.MicaData.load();return 49+s.extraLeads.length})()`);
   await cdp.evaluate(`document.querySelector('[data-view="configuracoes"]').click()`);
   assert("Configurações possui seção de metas", await cdp.evaluate(`document.getElementById("settings-goals") !== null && document.querySelectorAll(".goal-setting").length===4`));
   await cdp.evaluate(`(() => {document.getElementById("goal-contacts-target").value="1";document.getElementById("goal-contacts-period").value="week";document.getElementById("goal-meetings-target").value="1";document.getElementById("goal-meetings-period").value="month";document.getElementById("goal-proposals-target").value="1";document.getElementById("goal-proposals-period").value="week";document.getElementById("goal-sales-target").value="1";document.getElementById("goal-sales-period").value="month";document.querySelector('[data-action="save-settings"]').click()})()`);
-  assert("Metas editadas são salvas no estado v2", await cdp.evaluate(`(() => {const g=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).settings.goals;return g.contacts.target===1&&g.contacts.period==="week"&&g.meetings.period==="month"&&g.proposals.target===1&&g.sales.target===1})()`));
-  await cdp.evaluate(`location.reload()`);
-  assert("Metas permanecem após recarregar", await waitFor(cdp, `(() => {const g=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"))?.settings?.goals;return document.readyState==="complete"&&g?.contacts?.target===1&&g?.meetings?.period==="month"})()`, 8000));
+  assert("Metas editadas são salvas no estado v2", await cdp.evaluate(`(() => {const g=window.MicaData.load().settings.goals;return g.contacts.target===1&&g.contacts.period==="week"&&g.meetings.period==="month"&&g.proposals.target===1&&g.sales.target===1})()`));
+  await cdp.evaluate(`window.MicaCloud.flush().then(()=>location.reload())`);
+  assert("Metas permanecem após recarregar", await waitFor(cdp, `(() => {const g=window.MicaData.load()?.settings?.goals;return document.readyState==="complete"&&g?.contacts?.target===1&&g?.meetings?.period==="month"})()`, 8000));
   await cdp.evaluate(`document.querySelector('[data-view="leads"]').click()`);
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="reuniao_agendada";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Mover lead para reunião registra marco real", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="reuniao_agendada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="reuniao_agendada")})()`));
+  assert("Mover lead para reunião registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="reuniao_agendada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="reuniao_agendada")})()`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="proposta_enviada";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Mover lead para proposta registra marco real", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="proposta_enviada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="proposta_enviada")})()`));
+  assert("Mover lead para proposta registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="proposta_enviada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="proposta_enviada")})()`));
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="fechado";s.dispatchEvent(new Event("change",{bubbles:true}));const f=document.getElementById("close-form");f.elements.value.value="1500";f.requestSubmit()})()`);
-  assert("Mover lead para venda registra marco e financeiro", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="fechado"&&s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
+  assert("Mover lead para venda registra marco e financeiro", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="fechado"&&s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
   await cdp.evaluate(`document.querySelector('[data-view="dashboard"]').click()`);
   assert("Dashboard mostra quatro metas automáticas", await cdp.evaluate(`document.querySelectorAll(".goal-card").length===4 && [...document.querySelectorAll(".goal-card")].every(x=>x.textContent.includes("/ 1")&&x.textContent.includes("100%"))`));
   assert("Metas alcançadas recebem indicação visual", await cdp.evaluate(`document.querySelectorAll(".goal-card.is-complete").length===4`));
   await cdp.evaluate(`document.querySelector('[data-view="relatorios"]').click()`);
   assert("Relatórios por Segmento abre pela navegação", await cdp.evaluate(`document.getElementById("page-title").textContent==="Relatórios por Segmento" && document.querySelector(".report-table") !== null`));
-  assert("Relatório utiliza segmentos reais", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));return document.querySelectorAll(".report-table tbody tr").length===s.segments.length&&s.segments.every(seg=>document.body.textContent.includes(seg.name))})()`));
-  await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Instaladores de Ar"),select=document.querySelector('[data-report-filter="reportSegmentId"]');select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
+  assert("Relatório utiliza segmentos reais", await cdp.evaluate(`(() => {const s=window.MicaData.load();return document.querySelectorAll(".report-table tbody tr").length===s.segments.length&&s.segments.every(seg=>document.body.textContent.includes(seg.name))})()`));
+  await cdp.evaluate(`(() => {const s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Instaladores de Ar"),select=document.querySelector('[data-report-filter="reportSegmentId"]');select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   assert("Funil do segmento mostra cinco etapas", await cdp.evaluate(`document.querySelectorAll(".segment-funnel-step").length===5 && document.querySelector(".dash-card h3").textContent.includes("Instaladores de Ar")`));
   assert("Segmento reflete contato, reunião, proposta e venda", await cdp.evaluate(`(() => {const values=[...document.querySelectorAll(".report-kpis .metric-card strong")].map(x=>Number(x.textContent));return values[0]>=1&&values[1]===1&&values[2]===1&&values[3]===1&&values[4]===1})()`));
   assert("Taxas do segmento são calculadas corretamente", await cdp.evaluate(`(() => {const row=[...document.querySelectorAll(".report-table tbody tr")].find(x=>x.textContent.includes("Instaladores de Ar")),cells=[...row.cells].map(x=>x.textContent.trim()),leads=Number(cells[1]),meetings=Number(cells[3]),sales=Number(cells[5]),parse=x=>Number(x.replace("%","").replace(",","."));return Math.abs(parse(cells[6])-(meetings/leads*100))<.11&&Math.abs(parse(cells[9])-(sales/leads*100))<.11&&parse(cells[7])===100&&parse(cells[8])===100})()`));
@@ -439,7 +351,7 @@ try {
   assert("Intervalo personalizado recalcula para estado vazio", await cdp.evaluate(`[...document.querySelectorAll(".report-kpis .metric-card strong")].every(x=>Number(x.textContent)===0) && document.querySelector(".report-chart-grid .empty-state") !== null`));
   await cdp.evaluate(`(() => {const p=document.querySelector('[data-report-filter="reportPeriod"]');p.value="all";p.dispatchEvent(new Event("change",{bubbles:true}))})()`);
   assert("Todo o período inclui leads antigos", await cdp.evaluate(`(() => {const row=[...document.querySelectorAll(".report-table tbody tr")].find(x=>x.textContent.includes("Climatização"));return Number(row?.cells[1]?.textContent)>=49})()`));
-  assert("Implementação não perde leads anteriores", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));return 49+s.extraLeads.length===${leadCountBeforeGoals}})()`));
+  assert("Implementação não perde leads anteriores", await cdp.evaluate(`(() => {const s=window.MicaData.load();return 49+s.extraLeads.length===${leadCountBeforeGoals}})()`));
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   const reportMobile = await cdp.evaluate(`(() => {const nav=document.querySelector('[data-view="relatorios"]'),table=document.querySelector(".report-table-shell");return {nav:getComputedStyle(nav).display,tableWidth:table?.clientWidth,tableScroll:table?.scrollWidth,pageWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>391).slice(0,8).map(el=>({tag:el.tagName,cls:el.className,width:el.getBoundingClientRect().width,right:el.getBoundingClientRect().right}))}})()`);
   assert("Relatórios permanecem utilizáveis no celular", reportMobile.nav!=="none"&&reportMobile.tableScroll>reportMobile.tableWidth&&reportMobile.pageWidth<=390, JSON.stringify(reportMobile));
@@ -448,18 +360,18 @@ try {
 
   await cdp.evaluate(`document.querySelector('[data-view="catalogo"]').click()`);
   assert("Catálogo integra a navegação", await cdp.evaluate(`document.getElementById("page-title").textContent==="Serviços / Produtos" && document.querySelector(".catalog-grid") !== null`));
-  assert("Catálogo inicial preserva os serviços do gerador legado", await cdp.evaluate(`(() => {const p=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).proposals;return p.catalog.some(x=>x.name==="Criação de site institucional")&&p.catalog.some(x=>x.name==="Hospedagem mensal")&&p.catalog.some(x=>x.name==="Alteração simples")})()`));
+  assert("Catálogo inicial preserva os serviços do gerador legado", await cdp.evaluate(`(() => {const p=window.MicaData.load().proposals;return p.catalog.some(x=>x.name==="Criação de site institucional")&&p.catalog.some(x=>x.name==="Hospedagem mensal")&&p.catalog.some(x=>x.name==="Alteração simples")})()`));
   await cdp.evaluate(`(() => {const card=[...document.querySelectorAll(".catalog-card")].find(x=>x.querySelector("h3")?.textContent==="Criação de site institucional");card.querySelector('[data-action="edit-catalog-item"]').click();const form=document.getElementById("catalog-item-form");form.elements.defaultValue.value="875";form.requestSubmit()})()`);
-  assert("Editar serviço principal atualiza a fonte de receita potencial", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),item=s.proposals.catalog.find(x=>x.id==="svc_site_institucional");return item?.defaultValue===875&&s.settings.defaultValue===875})()`));
+  assert("Editar serviço principal atualiza a fonte de receita potencial", await waitFor(cdp, `(() => {const s=window.MicaData.load(),item=s.proposals.catalog.find(x=>x.id==="svc_site_institucional");return item?.defaultValue===875&&s.settings.defaultValue===875})()`));
   await cdp.evaluate(`(() => {const segment=document.getElementById("business-segment-filter");segment.value="all";segment.dispatchEvent(new Event("change",{bubbles:true}));document.querySelector('[data-view="dashboard"]').click()})()`);
-  const dashboardPotential = await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),all=(window.NEXO_BASE_LEADS||[]).concat(s.extraLeads||[]),valid=p=>!["Recusada","Expirada"].includes(p.status),proposalValue=id=>(s.proposals.list||[]).filter(p=>p.leadId===id&&valid(p)).sort((a,b)=>String(b.updatedAt||b.createdAt||"").localeCompare(String(a.updatedAt||a.createdAt||"")))[0]?.total,active=all.filter(l=>!["fechado","perdido"].includes(s.records[l.id]?.stage)),expected=active.reduce((sum,l)=>{const n=s.records[l.id]?.negotiation||{},values=[n.closedValue,n.negotiatedValue,proposalValue(l.id),n.proposedValue],specific=values.map(Number).find(v=>v>0);return sum+(specific||875)},0),card=[...document.querySelectorAll(".dash-stat")].find(x=>x.querySelector("span")?.textContent==="Receita potencial"),text=card?.querySelector("b")?.textContent||"",actual=Number(text.replace(/\\D/g,""));return {ok:active.length>0&&Math.round(expected)===actual,expected,actual,text,active:active.length,segment:document.getElementById("business-segment-filter")?.value}})()`);
+  const dashboardPotential = await cdp.evaluate(`(() => {const s=window.MicaData.load(),all=(s.extraLeads||[]),valid=p=>!["Recusada","Expirada"].includes(p.status),proposalValue=id=>(s.proposals.list||[]).filter(p=>p.leadId===id&&valid(p)).sort((a,b)=>String(b.updatedAt||b.createdAt||"").localeCompare(String(a.updatedAt||a.createdAt||"")))[0]?.total,active=all.filter(l=>!["fechado","perdido"].includes(s.records[l.id]?.stage)),expected=active.reduce((sum,l)=>{const n=s.records[l.id]?.negotiation||{},values=[n.closedValue,n.negotiatedValue,proposalValue(l.id),n.proposedValue],specific=values.map(Number).find(v=>v>0);return sum+(specific||875)},0),card=[...document.querySelectorAll(".dash-stat")].find(x=>x.querySelector("span")?.textContent==="Receita potencial"),text=card?.querySelector("b")?.textContent||"",actual=Number(text.replace(/\\D/g,""));return {ok:active.length>0&&Math.round(expected)===actual,expected,actual,text,active:active.length,segment:document.getElementById("business-segment-filter")?.value}})()`);
   assert("Dashboard recalcula receita potencial com catálogo real", dashboardPotential.ok, JSON.stringify(dashboardPotential));
   await cdp.evaluate(`document.querySelector('[data-view="catalogo"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-action="new-catalog-item"]').click()`);
   await cdp.evaluate(`(() => {const f=document.getElementById("catalog-item-form");f.elements.name.value="Consultoria de integração";f.elements.description.value="Configuração técnica personalizada";f.elements.category.value="Consultoria";f.elements.type.value="Serviço";f.elements.defaultValue.value="1234.50";f.elements.unit.value="projeto";f.requestSubmit()})()`);
-  assert("Cadastro de serviço persiste no catálogo", await waitFor(cdp, `(() => {const x=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).proposals.catalog.find(x=>x.name==="Consultoria de integração");return x?.defaultValue===1234.5&&x?.unit==="projeto"&&x?.active===true})()`));
+  assert("Cadastro de serviço persiste no catálogo", await waitFor(cdp, `(() => {const x=window.MicaData.load().proposals.catalog.find(x=>x.name==="Consultoria de integração");return x?.defaultValue===1234.5&&x?.unit==="projeto"&&x?.active===true})()`));
   await cdp.evaluate(`(() => {const card=[...document.querySelectorAll(".catalog-card")].find(x=>x.textContent.includes("Consultoria de integração"));card.querySelector('[data-action="toggle-catalog-item"]').click()})()`);
-  assert("Item do catálogo pode ser desativado", await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).proposals.catalog.find(x=>x.name==="Consultoria de integração").active===false`));
+  assert("Item do catálogo pode ser desativado", await cdp.evaluate(`window.MicaData.load().proposals.catalog.find(x=>x.name==="Consultoria de integração").active===false`));
   await cdp.evaluate(`(() => {const card=[...document.querySelectorAll(".catalog-card")].find(x=>x.textContent.includes("Consultoria de integração"));card.querySelector('[data-action="toggle-catalog-item"]').click();document.querySelector('[data-view="propostas"]').click()})()`);
   assert("Módulo de propostas abre nativamente", await cdp.evaluate(`document.getElementById("page-title").textContent==="Propostas" && document.querySelector('[data-action="new-proposal"]') !== null && document.body.textContent.includes("Propostas comerciais")`));
   await cdp.evaluate(`document.querySelector('[data-action="new-proposal"]').click()`);
@@ -467,9 +379,9 @@ try {
   await cdp.evaluate(`(() => {const emit=(el,type="input")=>el.dispatchEvent(new Event(type,{bubbles:true}));const company=document.querySelector('[data-company-field="name"]');company.value="Nexo Soluções";emit(company);const lead=document.querySelector("[data-proposal-lead]");lead.value=[...lead.options].find(x=>x.textContent.includes("Teste Automação")).value;emit(lead,"change");const search=document.querySelector("[data-proposal-catalog-search]");search.value="Consultoria de integração";emit(search);document.querySelector('[data-action="add-catalog-proposal-item"]').click();document.querySelector('[data-action="add-custom-proposal-item"]').click();const rows=document.querySelectorAll(".proposal-item-row"),custom=rows[1];const description=custom.querySelector('[data-item-field="description"]'),quantity=custom.querySelector('[data-item-field="quantity"]'),price=custom.querySelector('[data-item-field="unitPrice"]');description.value="Treinamento da equipe";emit(description);quantity.value="2";emit(quantity);price.value="100";emit(price);const discount=document.querySelector('[data-proposal-field="discount"]'),surcharge=document.querySelector('[data-proposal-field="surcharge"]'),status=document.querySelector('[data-proposal-field="status"]');discount.value="50";emit(discount);surcharge.value="25";emit(surcharge);status.value="Enviada";emit(status,"change")})()`);
   assert("Lead preenche cliente e cálculo atualiza em tempo real", await cdp.evaluate(`(() => {const total=document.querySelector('[data-proposal-total="total"]').textContent;return document.querySelector('[data-proposal-field="client.company"]').value==="Teste Automação"&&document.querySelectorAll(".proposal-item-row").length===2&&total.includes("1.409,50")})()`));
   await cdp.evaluate(`document.getElementById("proposal-form").requestSubmit()`);
-  assert("Proposta completa é salva no mesmo estado do CRM", await waitFor(cdp, `(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),p=s.proposals.list[0];return p?.client?.company==="Teste Automação"&&p?.items?.length===2&&p?.subtotal===1434.5&&p?.total===1409.5&&p?.status==="Enviada"&&s.records[p.leadId]?.negotiation?.proposedValue===1409.5&&s.records[p.leadId]?.negotiation?.proposalSourceId===p.id})()`));
+  assert("Proposta completa é salva no mesmo estado do CRM", await waitFor(cdp, `(() => {const s=window.MicaData.load(),p=s.proposals.list[0];return p?.client?.company==="Teste Automação"&&p?.items?.length===2&&p?.subtotal===1434.5&&p?.total===1409.5&&p?.status==="Enviada"&&s.records[p.leadId]?.negotiation?.proposedValue===1409.5&&s.records[p.leadId]?.negotiation?.proposalSourceId===p.id})()`));
   await cdp.evaluate(`document.querySelector('[data-action="duplicate-proposal"]').click();document.getElementById("proposal-form").requestSubmit()`);
-  assert("Duplicar proposta cria novo número sem alterar a original", await waitFor(cdp, `(() => {const xs=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).proposals.list;return xs.length===2&&new Set(xs.map(x=>x.number)).size===2&&xs.some(x=>x.status==="Rascunho")})()`));
+  assert("Duplicar proposta cria novo número sem alterar a original", await waitFor(cdp, `(() => {const xs=window.MicaData.load().proposals.list;return xs.length===2&&new Set(xs.map(x=>x.number)).size===2&&xs.some(x=>x.status==="Rascunho")})()`));
   await cdp.evaluate(`(() => {const rows=document.querySelectorAll(".proposal-table tbody tr");rows[rows.length-1].querySelector('[data-action="preview-proposal"]').click()})()`);
   assert("Visualização monta documento comercial multipágina", await cdp.evaluate(`(() => {const doc=document.getElementById("proposal-print"),text=doc?.textContent.toUpperCase()||"";return document.querySelectorAll("#proposal-print .proposal-page").length>=3&&text.includes("INVESTIMENTO")&&text.includes("CONDIÇÕES")})()`));
   assert("Tema claro não altera o design interno da proposta", await cdp.evaluate(`(() => {const doc=document.getElementById("proposal-print"),style=getComputedStyle(doc);return document.documentElement.dataset.theme==="light"&&style.getPropertyValue("--doc-paper").trim()==="#e8e8e5"&&style.getPropertyValue("--doc-pink").trim()==="#ff4f87"})()`));
@@ -485,33 +397,33 @@ try {
   assert("PDF contém somente as três páginas da proposta", (pdfBuffer.toString("latin1").match(/\/Type\s*\/Page\b/g) || []).length === 3);
   await cdp.evaluate(`window.print=()=>{window.__proposalPrinted=true};document.querySelector('[data-action="print-proposal"]').click()`);
   assert("Ação Imprimir / PDF usa impressão nativa", await waitFor(cdp, `window.__proposalPrinted===true`));
-  await cdp.evaluate(`document.querySelector('[data-action="back-proposals"]').click();location.reload()`);
-  assert("Propostas e empresa sobrevivem ao reload", await waitFor(cdp, `(() => {const p=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"))?.proposals;return document.readyState==="complete"&&p?.list?.length===2&&p?.company?.name==="Nexo Soluções"})()`, 8000));
+  await cdp.evaluate(`document.querySelector('[data-action="back-proposals"]').click();window.MicaCloud.flush().then(()=>location.reload())`);
+  assert("Propostas e empresa sobrevivem ao reload", await waitFor(cdp, `(() => {const p=window.MicaData.load()?.proposals;return document.readyState==="complete"&&p?.list?.length===2&&p?.company?.name==="Nexo Soluções"})()`, 8000));
   await cdp.evaluate(`document.querySelector('[data-view="propostas"]').click();document.querySelector('.proposal-table tbody tr [data-action="delete-proposal"]').click()`);
   assert("Exclusão de proposta solicita confirmação", await cdp.evaluate(`document.getElementById("proposal-delete-form") !== null`));
   await cdp.evaluate(`document.getElementById("proposal-delete-form").requestSubmit()`);
-  assert("Excluir proposta preserva catálogo e demais propostas", await waitFor(cdp, `(() => {const p=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")).proposals;return p.list.length===1&&p.catalog.some(x=>x.name==="Consultoria de integração")})()`));
+  assert("Excluir proposta preserva catálogo e demais propostas", await waitFor(cdp, `(() => {const p=window.MicaData.load().proposals;return p.list.length===1&&p.catalog.some(x=>x.name==="Consultoria de integração")})()`));
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert("Propostas permanecem utilizáveis no celular", await cdp.evaluate(`(() => {const nav=document.querySelector('[data-view="propostas"]'),table=document.querySelector(".proposal-table-shell");return getComputedStyle(nav).display!=="none"&&table&&table.scrollWidth>=table.clientWidth&&document.documentElement.scrollWidth<=390})()`));
   await cdp.send("Emulation.clearDeviceMetricsOverride");
 
   await cdp.evaluate(`(() => {const old={salvoEm:"2026-08-01T10:00:00Z",extras:[{id:"legacy-test",nome:"Lead Legado",telefone:"+5511900000000",cidade:"Cotia",site:"",nota:"5",avaliacoes:40}],fichas:{"legacy-test":{status:"nao_atendeu",tentativas:3,obs:"Observação antiga",ultimo:"2026-08-01",retorno:"2026-09-30"}}};const file=new File([JSON.stringify(old)],"backup-v1.json",{type:"application/json"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-backup");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
-  assert("Backup v1 é migrado", await waitFor(cdp, `localStorage.getItem("crm_climatizacao_sp_v2").includes("Lead Legado") && localStorage.getItem("crm_climatizacao_sp_v2").includes("tentando_contato")`));
+  assert("Backup v1 é migrado", await waitFor(cdp, `JSON.stringify(window.MicaData.load()).includes("Lead Legado") && JSON.stringify(window.MicaData.load()).includes("tentando_contato")`));
   assert("Chave v1 não é apagada", await cdp.evaluate(`JSON.parse(localStorage.getItem("crm_climatizacao_sp_v1")).marcador === "preservar"`));
-  await cdp.evaluate(`(() => {const select=document.getElementById("business-segment-filter"),s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),seg=s.segments.find(x=>x.name==="Instaladores de Ar");select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Último segmento é salvo", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2"));return s.lastSegmentId===s.segments.find(x=>x.name==="Instaladores de Ar").id})()`));
+  await cdp.evaluate(`(() => {const select=document.getElementById("business-segment-filter"),s=window.MicaData.load(),seg=s.segments.find(x=>x.name==="Instaladores de Ar");select.value=seg.id;select.dispatchEvent(new Event("change",{bubbles:true}))})()`);
+  assert("Último segmento é salvo", await cdp.evaluate(`(() => {const s=window.MicaData.load();return s.lastSegmentId===s.segments.find(x=>x.name==="Instaladores de Ar").id})()`));
 
-  await cdp.evaluate(`location.reload()`);
-  assert("Recarregar preserva alterações", await waitFor(cdp, `document.readyState === "complete" && document.querySelector(".metrics-grid") !== null && localStorage.getItem("crm_climatizacao_sp_v2")?.includes("Teste Automação")`, 8000));
+  await cdp.evaluate(`window.MicaCloud.flush().then(()=>location.reload())`);
+  assert("Recarregar preserva alterações", await waitFor(cdp, `document.readyState === "complete" && document.querySelector(".metrics-grid") !== null && JSON.stringify(window.MicaData.load())?.includes("Teste Automação")`, 8000));
   assert("Recarregar preserva o segmento selecionado", await cdp.evaluate(`document.getElementById("business-segment-filter").selectedOptions[0].textContent.includes("Instaladores de Ar")`));
   await cdp.evaluate(`document.querySelector('[data-view="agenda"]').click()`);
   assert("Agenda renderiza", await cdp.evaluate(`document.querySelectorAll(".agenda-day").length === 7`));
   await cdp.evaluate(`document.querySelector('[data-view="pipeline"]').click()`);
-  assert("Segmento selecionado limita o pipeline", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return document.querySelectorAll(".pipeline-card").length===expected})()`));
+  assert("Segmento selecionado limita o pipeline", await cdp.evaluate(`(() => {const s=window.MicaData.load(),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return document.querySelectorAll(".pipeline-card").length===expected})()`));
   await cdp.evaluate(`document.querySelector('[data-view="dashboard"]').click()`);
-  assert("Segmento selecionado limita as métricas", await cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem("crm_climatizacao_sp_v2")),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return Number(document.querySelector(".dash-stat b")?.textContent)===expected})()`));
+  assert("Segmento selecionado limita as métricas", await cdp.evaluate(`(() => {const s=window.MicaData.load(),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return Number(document.querySelector(".dash-stat b")?.textContent)===expected})()`));
   const dashboardHasRevenue = await cdp.evaluate(`document.body.textContent.includes("1.500")`);
-  const dashboardDebug = await cdp.evaluate(`({text:document.querySelector(".dash-metrics")?.textContent||"",stored:localStorage.getItem("crm_climatizacao_sp_v2")?.match(/closedValue[^,}]*/)?.[0]||""})`);
+  const dashboardDebug = await cdp.evaluate(`({text:document.querySelector(".dash-metrics")?.textContent||"",stored:JSON.stringify(window.MicaData.load())?.match(/closedValue[^,}]*/)?.[0]||""})`);
   assert("Dashboard reflete receita", dashboardHasRevenue, JSON.stringify(dashboardDebug));
 
   await cdp.evaluate(`document.querySelector('[data-view="configuracoes"]').click()`);
@@ -529,16 +441,11 @@ try {
   await cdp.evaluate(`document.querySelector('[data-action="backup-json"]').click()`);
   const jsonPath = await waitForDownload(".json");
   assert("Backup JSON funciona", jsonPath && JSON.parse(readFileSync(jsonPath, "utf8")).version === 2);
-  assert("Backup JSON inclui a base local para migrar de dispositivo", jsonPath && JSON.parse(readFileSync(jsonPath, "utf8")).extraLeads.length >= 49);
+  assert("Backup JSON inclui todos os leads da conta", jsonPath && JSON.parse(readFileSync(jsonPath, "utf8")).extraLeads.length >= 49);
   await cdp.evaluate(`document.querySelector('[data-action="export-csv"]').click()`);
   const csvPath = await waitForDownload(".csv");
   assert("Exportar CSV funciona", csvPath && readFileSync(csvPath, "utf8").includes("Próxima ação"));
-  await cdp.evaluate(`document.querySelector('[data-action="export-html"]').click()`);
-  const htmlPath = await waitForDownload(".html");
-  const exportedHTML = htmlPath ? readFileSync(htmlPath, "utf8") : "";
-  assert("Exportar HTML atualizado funciona", exportedHTML.includes('id="app-v2"') && exportedHTML.includes('"version":2') && exportedHTML.includes("window.createNexoSearch"));
-  await cdp.send("Page.navigate", { url: pathToFileURL(htmlPath).href });
-  assert("HTML exportado abre com os dados", await waitFor(cdp, `document.querySelector(".metrics-grid") !== null && document.body.textContent.includes("Bom dia")`, 8000));
+  assert("Exportação offline foi removida", await cdp.evaluate(`!document.querySelector('[data-action="export-html"]') && !window.NexoStorage && !window.NEXO_BASE_LEADS`));
   assert("Sem erros de execução", exceptions.length === 0, exceptions.join(" | "));
 
   console.log(JSON.stringify({ ok: true, passed: results.length, results }, null, 2));
@@ -546,9 +453,5 @@ try {
   console.error(JSON.stringify({ ok: false, error: error.message, exceptions, results }, null, 2));
   process.exitCode = 1;
 } finally {
-  try { cdp?.close(); } catch {}
-  try { browser.kill(); } catch {}
-  await sleep(150);
-  const root = tmpdir();
-  if (profile.startsWith(root) && profile.includes("crm-prospeccao-test-")) rmSync(profile, { recursive: true, force: true });
+ await harness.close();
 }

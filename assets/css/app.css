@@ -14,14 +14,9 @@
   .sidebar{position:relative;z-index:20;padding:18px 12px;display:flex;flex-direction:column;align-items:center;border-right:1px solid var(--line);background:#070807}
   .brand-mark{width:46px;height:46px;border:0;border-radius:16px;background:var(--accent);color:var(--accent-ink);font-size:19px;font-weight:900;letter-spacing:-.07em;cursor:pointer;box-shadow:0 10px 30px rgba(184,255,79,.14)}
   .brand-mark span{font-size:12px;vertical-align:top;margin-left:1px}
-  .side-nav{display:flex;flex-direction:column;gap:8px;margin-top:34px}
-  .side-nav-bottom{margin-top:auto}
-  .side-link,.icon-btn{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:14px;background:transparent;color:#777d76;cursor:pointer;transition:.16s ease}
-  .side-link:hover,.icon-btn:hover{background:var(--surface-3);color:var(--ink);transform:translateY(-1px)}
-  .side-link.is-active{background:var(--paper);color:var(--dark-ink)}
-  .side-link.is-active:before{content:"";position:absolute;left:-13px;width:3px;height:18px;border-radius:9px;background:var(--accent)}
-  .side-link:after{content:attr(data-tip);position:absolute;z-index:100;left:55px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#252825;color:#fff;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transform:translateX(-4px);transition:.14s}
-  .side-link:hover:after{opacity:1;transform:none}
+  .side-link{position:relative;border:0;background:transparent;cursor:pointer}
+  .icon-btn{position:relative;display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:14px;background:transparent;color:#777d76;cursor:pointer;transition:.16s ease}
+  .icon-btn:hover{background:var(--surface-3);color:var(--ink);transform:translateY(-1px)}
   .icon{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .workspace{min-width:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
   .topbar{position:relative;z-index:15;min-height:84px;padding:14px 22px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);background:rgba(9,10,9,.91);backdrop-filter:blur(18px)}

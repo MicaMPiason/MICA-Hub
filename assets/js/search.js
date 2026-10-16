@@ -50,23 +50,21 @@
       return best;
     }
     function create(){
-      var documents=[],byId=new Map();
+      var documents=[];
       return {
         build:function(items,mapper){
           documents=(items||[]).map(function(item){var raw=mapper(item)||{},fields=(raw.fields||[]).map(prepareField);return {id:String(raw.id||item.id),item:item,fields:fields};});
-          byId=new Map(documents.map(function(document){return [document.id,document];}));return documents.length;
+          return documents.length;
         },
         search:function(query){
           var normalized=normalizeText(query),queryDigits=normalizeNumber(query),tokens=queryDigits.length>=5&&!/[a-z]/.test(normalized)?[queryDigits]:normalized.split(" ").map(function(token){var numeric=normalizeNumber(token);return numeric.length>=3&&!/[a-z]/.test(token)?numeric:token.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g,"");}).filter(Boolean);if(!tokens.length)return documents.map(function(document){return {id:document.id,item:document.item,score:0};});
           return documents.map(function(document){var score=0,matched=true;tokens.forEach(function(token){var value=tokenScore(document,token);if(!value)matched=false;else score+=value;});if(matched){var name=document.fields.find(function(field){return field.name==="name";}),company=document.fields.find(function(field){return field.name==="company";});[name,company].filter(Boolean).forEach(function(field){if(field.text===normalized)score+=260*field.weight;else if(field.text.indexOf(normalized)===0)score+=140*field.weight;});}return matched?{id:document.id,item:document.item,score:score}:null;}).filter(Boolean).sort(function(a,b){return b.score-a.score||a.id.localeCompare(b.id);});
         },
-        get:function(id){return byId.get(String(id));},
         size:function(){return documents.length;}
       };
     }
     return {create:create,normalizeText:normalizeText,normalizeNumber:normalizeNumber,debounce:debounce};
   }
 
-  global.createNexoSearch=createNexoSearch;
   global.NexoSearch=createNexoSearch();
 })(window);

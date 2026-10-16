@@ -1,106 +1,17 @@
-import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-
-const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const root = new URL("../", import.meta.url);
-const html = new URL("index.html", root);
+import { launchBrowser, sleep, waitFor } from "./helpers/browser.mjs";
+import { crmFixture } from "./fixtures/crm.mjs";
 const visualDir = process.env.MICA_SIDEBAR_SCREENSHOTS;
-if (visualDir) mkdirSync(visualDir, { recursive: true });
-const profile = mkdtempSync(join(tmpdir(), "mica-sidebar-test-"));
-const downloads = join(profile, "downloads");
-mkdirSync(downloads);
-// A clean, synthetic, offline fixture: never loads the user's local lead file.
-const fixture = join(profile, "sidebar-fixture.html");
-writeFileSync(fixture, readFileSync(html, "utf8").replaceAll('assets/', new URL('assets/', root).href).replace('assets/js/data.js', 'assets/js/data.example.js'));
-const port = 9352;
-const browser = spawn(edge, [
-  "--headless=new",
-  "--disable-gpu",
-  "--no-first-run",
-  "--disable-extensions",
-  "--allow-file-access-from-files",
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  pathToFileURL(fixture).href
-], { stdio: "ignore", windowsHide: true });
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const results = [];
-const exceptions = [];
-
+if (visualDir) mkdirSync(visualDir, {recursive:true});
+const results = [], exceptions = [];
+const harness = await launchBrowser({document:crmFixture(0),exceptions});
+const { cdp } = harness;
 function assert(name, condition, detail = "") {
   results.push({ name, ok: Boolean(condition), detail });
   if (!condition) throw new Error(`${name}${detail ? `: ${detail}` : ""}`);
 }
 
-async function endpoint() {
-  for (let i = 0; i < 50; i++) {
-    try {
-      const pages = await fetch(`http://127.0.0.1:${port}/json`).then(r => r.json());
-      const page = pages.find(p => p.type === "page");
-      if (page) return page.webSocketDebuggerUrl;
-    } catch {}
-    await sleep(100);
-  }
-  throw new Error("Edge DevTools não iniciou");
-}
-
-class CDP {
-  constructor(url) {
-    this.ws = new WebSocket(url);
-    this.id = 0;
-    this.pending = new Map();
-  }
-  async open() {
-    await new Promise((resolve, reject) => {
-      this.ws.addEventListener("open", resolve, { once: true });
-      this.ws.addEventListener("error", reject, { once: true });
-    });
-    this.ws.addEventListener("message", event => {
-      const msg = JSON.parse(event.data);
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
-      }
-      if (msg.method === "Runtime.exceptionThrown") {
-        exceptions.push(msg.params.exceptionDetails.text || "Runtime exception");
-      }
-    });
-  }
-  send(method, params = {}) {
-    const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-  }
-  async evaluate(expression) {
-    const result = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true
-    });
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-    }
-    return result.result.value;
-  }
-  close() { this.ws.close(); }
-}
-
-async function waitFor(cdp, expression, timeout = 5000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (await cdp.evaluate(expression)) return true;
-    await sleep(80);
-  }
-  return false;
-}
-
-
-let cdp;
 const q = value => JSON.stringify(value);
 async function click(selector) {
   const point = await cdp.evaluate(`(() => {const n=document.querySelector(${q(selector)});if(!n||n.closest('[hidden],[inert]'))return null;n.scrollIntoView({block:"nearest",inline:"nearest",behavior:"instant"});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
@@ -123,16 +34,11 @@ async function capture(name) {
   writeFileSync(join(visualDir, name+".png"), Buffer.from(shot.data,"base64"));
 }
 try {
-  cdp = new CDP(await endpoint());
-  await cdp.open();
-  await cdp.send("Runtime.enable");
-  await cdp.send("Page.enable");
-  await cdp.send("Page.setDownloadBehavior", {behavior:"allow",downloadPath:downloads});
   await viewport(1440,960);
-  assert("Hub inicia sem dados pessoais", await waitFor(cdp, `!!document.querySelector(".metrics-grid") && window.NEXO_BASE_LEADS.length===0`));
+  assert("Hub inicia sem dados pessoais", await waitFor(cdp, `!!document.querySelector(".metrics-grid") && window.MicaData.load().extraLeads.length===0`));
   assert("Sidebar expandida no desktop", await cdp.evaluate(`Math.round(document.querySelector(".sidebar").getBoundingClientRect().width)===248 && !document.querySelector(".sidebar").inert`));
   assert("Todos os módulos do Hub preservados", await cdp.evaluate(`["hoje","pipeline","leads","agenda","dashboard","relatorios","propostas","catalogo","financeiro","configuracoes"].every(v=>document.querySelector('.side-link[data-view="'+v+'"]'))`));
-  assert("Conta não aparece sem autenticação", await cdp.evaluate(`document.getElementById("cloud-account").hidden`));
+  assert("Conta da sessão é exibida", await cdp.evaluate(`!document.getElementById("cloud-account").hidden`));
   await cdp.evaluate(`document.querySelector('[data-view="configuracoes"]').click();document.querySelector('[data-theme-choice="light"]').click();document.querySelector('[data-view="hoje"]').click()`);
   await sleep(250);
   const lightPalette = await cdp.evaluate(`({body:getComputedStyle(document.body).backgroundColor,sidebar:getComputedStyle(document.querySelector(".sidebar")).backgroundColor,active:getComputedStyle(document.querySelector(".side-link.is-active")).backgroundColor})`);
@@ -201,22 +107,12 @@ try {
   await cdp.send("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:"reduce"}]});
   assert("Movimento reduzido respeitado", await cdp.evaluate(`getComputedStyle(document.querySelector(".app-shell")).transitionDuration==="0s" && getComputedStyle(document.querySelector(".sidebar-indicator")).transitionDuration==="0s"`));
   await click('[data-action="open-data"]');
-  await click('[data-action="export-html"]');
-  const downloaded = await (async()=>{for(let i=0;i<60;i++){const f=readdirSync(downloads).find(n=>n.endsWith(".html"));if(f)return join(downloads,f);await sleep(100);}return null})();
-  assert("Backup HTML incorpora a sidebar sem dependências externas", downloaded && readFileSync(downloaded,"utf8").includes("window.createMicaSidebar=function createMicaSidebar"));
-  await cdp.send("Page.navigate", {url:pathToFileURL(downloaded).href});
-  assert("Backup offline inicia a sidebar", await waitFor(cdp,`!!document.querySelector(".metrics-grid") && !!document.querySelector(".sidebar")._micaSidebar`));
-  await click(".sidebar-trigger");
-  assert("Sidebar funciona dentro do backup exportado", await cdp.evaluate(`document.querySelector(".app-shell").dataset.sidebarState==="collapsed"`));
+  assert("Backups de dados continuam disponíveis sem modo offline", await cdp.evaluate(`!!document.querySelector('[data-action="backup-json"]') && !!document.querySelector('[data-action="export-csv"]') && !document.querySelector('[data-action="export-html"]')`));
   assert("Sem erros de execução", exceptions.length===0, exceptions.join(" | "));
   console.log(JSON.stringify({ok:true,passed:results.length,results},null,2));
 } catch(error) {
   console.error(JSON.stringify({ok:false,error:error.message,exceptions,results},null,2));
   process.exitCode=1;
 } finally {
-  try { cdp?.close(); } catch {}
-  try { browser.kill(); } catch {}
-  await sleep(150);
-  if(profile.startsWith(tmpdir()) && profile.includes("mica-sidebar-test-")) rmSync(profile,{recursive:true,force:true});
+ await harness.close();
 }
-

@@ -14,7 +14,6 @@
 .sidebar-v2 .side-link{display:flex;align-items:center;justify-content:flex-start;gap:12px;width:100%;height:42px;min-height:42px;padding:0 12px;border-radius:10px;color:var(--muted);text-align:left;font-size:12px;font-weight:500;white-space:nowrap;transform:none;overflow:hidden;transition:background-color 160ms,color 160ms,box-shadow 160ms}
 .sidebar-v2 .side-link>span[data-icon]{display:flex;flex:0 0 20px;align-items:center;justify-content:center}
 .sidebar-v2 .side-link .icon{width:19px;height:19px;flex-shrink:0}
-.sidebar-v2 .side-link:before,.sidebar-v2 .side-link:after{display:none}
 .sidebar-v2 .side-link:hover{background:var(--surface-3);color:var(--ink);transform:none}
 .sidebar-v2 .side-link:active,.sidebar-trigger:active,.sidebar-profile:active{transform:scale(.98)}
 .sidebar-v2 .side-link.is-active{background:var(--paper);color:var(--dark-ink)}
