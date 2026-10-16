@@ -92,6 +92,10 @@ export async function launchBrowser({ document, exceptions = [] }) {
         response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
         response.end('(' + mockCloud.toString() + ')(' + JSON.stringify(stored).replaceAll('<', '\\u003c') + ');'); return;
       }
+      if (pathname === '/assets/js/charts.js') {
+        response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        response.end(await readFile(path.join(root, 'dist/assets/js/charts.js'))); return;
+      }
       if (pathname !== '/' && !/^\/assets\/(css\/[\w-]+\.css|js\/[\w-]+\.js|Logotipo[^/]+\.png)$/.test(decodeURIComponent(pathname))) {
         response.writeHead(404).end(); return;
       }

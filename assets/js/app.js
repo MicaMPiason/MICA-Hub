@@ -305,7 +305,9 @@ window.NexoCRMApp = function(){
   function render(){
     updateChrome(); var root=document.getElementById("view-root"),html="";
     if(ui.view==="hoje")html=renderToday(); else if(ui.view==="pipeline")html=renderPipeline(); else if(ui.view==="leads")html=renderLeads(); else if(ui.view==="agenda")html=renderAgenda(); else if(ui.view==="dashboard")html=renderDashboard(); else if(ui.view==="relatorios")html=renderSegmentReports(); else if(ui.view==="propostas")html=renderProposals(); else if(ui.view==="catalogo")html=renderCatalog(); else if(ui.view==="financeiro")html=renderFinancial(); else html=renderSettings();
+    if(window.MicaCharts)window.MicaCharts.destroy();
     root.innerHTML=html; hydrateIcons(root);prepareResponsiveTables(root);observeProposalLayout();
+    if(ui.view==="dashboard"){if(window.MicaCharts)window.MicaCharts.mount(root.querySelector(".commercial-dashboard"),dashboardModel);else{root.querySelectorAll(".dashboard-chart-wrap,.dashboard-spark").forEach(function(wrap){wrap.hidden=true;});root.querySelector("[data-chart-error]").hidden=false;}}
   }
   function prepareResponsiveTables(root){
     root.querySelectorAll(".data-table,.import-preview").forEach(function(table){
@@ -430,35 +432,14 @@ window.NexoCRMApp = function(){
   function weekStart(d){d=d||new Date();var x=new Date(d),day=x.getDay();x.setDate(x.getDate()-(day===0?6:day-1));return x;}
   function eventColor(type){var t=normalize(type);return t.indexOf("reuniao")>=0?"#b7a0ff":t.indexOf("proposta")>=0?"#ff91c8":t.indexOf("whatsapp")>=0?"#67dd9a":t.indexOf("ligar")>=0||t.indexOf("ligacao")>=0?"#ffbd59":"#7eb7ff";}
 
+  var dashboardModel=null;
   function renderDashboard(){
-    var m=dashboardMetrics(),periods=[['today','Hoje'],['7','7 dias'],['30','30 dias'],['month','Este mês'],['all','Todos']],actions='<div class="segmented">'+periods.map(function(p){return '<button data-period="'+p[0]+'" class="'+(ui.dashboardPeriod===p[0]?'is-active':'')+'">'+p[1]+'</button>';}).join("")+'</div>';
-    var h=topHead("Visão comercial","Entenda volume, conversão e receita do seu processo",actions);
-    var stats=[[m.total,'Leads totais'],[m.worked,'Leads trabalhados'],[m.attempts,'Ligações'],[m.messages,'WhatsApps registrados'],[m.conversations,'Conversas'],[m.answerRate+'%','Taxa de atendimento'],[m.interested,'Interessados'],[m.meetings,'Reuniões'],[m.proposals,'Propostas enviadas'],[m.negotiations,'Negociações'],[m.closed,'Fechados'],[m.closeRate+'%','Taxa de fechamento'],[money(m.potential),'Receita potencial'],[money(m.revenue),'Receita fechada'],[money(m.ticket),'Ticket médio']];
-    h+='<div class="dash-metrics">'+stats.map(function(s){return '<div class="dash-stat"><b>'+esc(s[0])+'</b><span>'+esc(s[1])+'</span></div>';}).join("")+'</div>';
-    h+=renderGoalsSummary();
-    h+='<div class="dashboard-grid section"><article class="dash-card span-5"><h3>Funil</h3><p>Distribuição atual das oportunidades</p><div class="funnel">'+m.funnel.map(function(x,i){return '<div class="funnel-row"><span>'+esc(x.name)+'</span><div class="bar-track"><div class="bar-fill" style="width:'+x.pct+'%;--bar-color:'+(STAGES[Math.min(i*2,STAGES.length-1)]||STAGES[0]).color+'"></div></div><strong>'+x.value+'</strong></div>';}).join("")+'</div></article><article class="dash-card span-7"><h3>Atividade</h3><p>Ligações e tentativas nos últimos 7 dias</p><div class="activity-chart">'+m.activity.map(function(x){return '<div class="chart-day"><b>'+x.value+'</b><i style="height:'+Math.max(3,x.pct)+'%"></i><span>'+esc(x.label)+'</span></div>';}).join("")+'</div></article><article class="dash-card span-7"><h3>Motivos de perda</h3><p>Onde as oportunidades estão sendo perdidas</p><div class="reason-list">'+(m.losses.length?m.losses.map(function(x){return '<div class="reason-row"><span>'+esc(x.name)+'</span><div class="bar-track"><div class="bar-fill" style="width:'+x.pct+'%;--bar-color:#ff6b69"></div></div><strong>'+x.value+'</strong></div>';}).join(""):emptyHTML("chart","Sem perdas registradas","Os motivos aparecerão após qualificar leads como perdidos."))+'</div></article><article class="dash-card span-5"><h3>Resultados</h3><p>Resumo financeiro do pipeline</p><div class="funnel"><div class="funnel-row"><span>Potencial</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><strong>'+money(m.potential)+'</strong></div><div class="funnel-row"><span>Fechado</span><div class="bar-track"><div class="bar-fill" style="width:'+(m.potential?Math.min(100,m.revenue/m.potential*100):0)+'%;--bar-color:#67dd9a"></div></div><strong>'+money(m.revenue)+'</strong></div></div></article></div>'; return h;
+    dashboardModel=window.MicaDashboard.build({
+      items:leads.map(function(raw){var lead=getLead(raw.id),record=rec(raw.id);return {id:lead.id,name:lead.nome,segmentId:segmentIdFor(lead),source:lead.origem||"",createdAt:record.createdAt,record:record,potential:potential(lead.id)};}),
+      stages:Pipeline.stages,segments:state.segments,matches:Pipeline.activityMatches,period:ui.dashboardPeriod,segmentId:ui.segmentId
+    });
+    return window.MicaDashboardView.render(dashboardModel,{icon:icon,money:money,goals:renderGoalsSummary(dashboardModel),segmentName:ui.segmentId==="all"?"Todos os tipos de negócio":segmentName(ui.segmentId),period:ui.dashboardPeriod});
   }
-  function dashboardMetrics(){
-    var scope=segmentLeads(),start=periodStart(ui.dashboardPeriod),history=[];
-    scope.forEach(function(lead){rec(lead.id).history.forEach(function(event){if((!start||new Date(event.at)>=start)&&!(event.meta&&event.meta.launchedOnly))history.push(event);});});
-    var attempts=history.filter(function(event){return event.type==="call";}).length,conversations=history.filter(function(event){return Pipeline.activityMatches(event,"conversations");}).length;
-    if(ui.dashboardPeriod==="all")attempts=scope.reduce(function(total,lead){var record=rec(lead.id);return total+Math.max(record.attempts,record.history.filter(function(event){return event.type==="call";}).length);},0);
-    var meetings=scope.filter(function(lead){return leadHasActivity(lead,"meetings",start?{start:todayKey(start),end:todayKey()}:{start:"",end:""});}).length;
-    var proposals=scope.filter(function(lead){return leadHasActivity(lead,"proposals",start?{start:todayKey(start),end:todayKey()}:{start:"",end:""});}).length;
-    var closed=scope.filter(function(lead){return pipelineFor(lead.id).stage==="fechado";}),worked=scope.filter(function(lead){var record=rec(lead.id);return record.attempts>0||record.lastContact||record.history.some(function(event){return Pipeline.activityMatches(event,"contacts");});}).length;
-    var potential=activeLeads().reduce(function(total,lead){return total+potentialValue(lead.id);},0),revenue=closed.reduce(function(total,lead){return total+Number(rec(lead.id).negotiation.closedValue||0);},0);
-    var funnelSteps=Pipeline.operational.concat([Pipeline.stage("fechado")]).map(function(stage){return {name:stage.name,value:scope.filter(function(lead){return pipelineFor(lead.id).stage===stage.id;}).length};}),max=Math.max.apply(null,funnelSteps.map(function(item){return item.value;}))||1;
-    funnelSteps.forEach(function(item){item.pct=Math.max(3,Math.round(item.value/max*100));});
-    var activity=[],activityMax=1;
-    for(var offset=6;offset>=0;offset--){var day=addDays(todayKey(),-offset),count=history.filter(function(event){return Pipeline.activityMatches(event,"contacts")&&dayFromValue(event.at)===day;}).length;activityMax=Math.max(activityMax,count);activity.push({label:parseLocalDate(day).toLocaleDateString("pt-BR",{weekday:"short"}).replace(".",""),value:count});}
-    activity.forEach(function(item){item.pct=item.value/activityMax*90;});
-    var lossMap={};scope.filter(function(lead){return pipelineFor(lead.id).stage==="perdido";}).forEach(function(lead){var reason=rec(lead.id).negotiation.lossReason||"Não informado";lossMap[reason]=(lossMap[reason]||0)+1;});
-    var losses=Object.keys(lossMap).map(function(reason){return {name:reason,value:lossMap[reason]};}).sort(function(left,right){return right.value-left.value;}),lossMax=losses[0]?losses[0].value:1;losses.forEach(function(item){item.pct=item.value/lossMax*100;});
-    var interested=scope.filter(function(lead){return ["oportunidades","propostas","fechado"].includes(pipelineFor(lead.id).stage);}).length;
-    return {total:scope.length,worked:worked,attempts:attempts,conversations:conversations,messages:history.filter(function(event){return event.type==="whatsapp";}).length,answerRate:attempts?Math.round(history.filter(function(event){return event.type==="call"&&event.meta&&event.meta.answered;}).length/attempts*100):0,interested:interested,meetings:meetings,proposals:proposals,negotiations:scope.filter(function(lead){return pipelineFor(lead.id).substatus==="Negociando valores";}).length,closed:closed.length,closeRate:worked?Math.round(closed.length/worked*100):0,potential:potential,revenue:revenue,ticket:closed.length?revenue/closed.length:0,funnel:funnelSteps,activity:activity,losses:losses};
-  }
-  function potentialValue(id){return potential(id);}
-  function periodStart(p){var d=new Date();if(p==="all")return null;if(p==="today"){d.setHours(0,0,0,0);return d;}if(p==="month"){return new Date(d.getFullYear(),d.getMonth(),1);}d.setDate(d.getDate()-Number(p||30)+1);d.setHours(0,0,0,0);return d;}
 
   function dayFromValue(value){if(!value)return "";var text=String(value);if(/^\d{4}-\d{2}-\d{2}$/.test(text))return text;var d=new Date(value);return isNaN(d.getTime())?"":todayKey(d);}
   function rangeForPeriod(period,start,end){
@@ -488,9 +469,9 @@ window.NexoCRMApp = function(){
   }
   function rate(value,total){return total?value/total*100:0;}
   function percent(value){return new Intl.NumberFormat("pt-BR",{maximumFractionDigits:1}).format(value||0)+"%";}
-  function renderGoalsSummary(){
-    var labels={contacts:"Contatos",meetings:"Reuniões",proposals:"Propostas",sales:"Vendas"},goals=state.settings.goals,scope=segmentLeads();
-    return '<section class="section goals-summary"><div class="section-head compact"><div><div class="section-label">Metas</div><p>Progresso automático com os registros do CRM</p></div><button class="btn btn-sm btn-ghost" data-view="configuracoes">Editar metas '+icon("arrow")+'</button></div><div class="goal-grid">'+Object.keys(labels).map(function(key){var goal=goals[key],range=rangeForPeriod(goal.period),current=metricsForLeadSet(scope,range)[key],pct=Math.round(current/goal.target*100),done=pct>=100;return '<article class="goal-card '+(done?'is-complete':'')+'"><div><span>'+labels[key]+'</span><em>'+(goal.period==="month"?'Mensal':'Semanal')+'</em></div><strong>'+current+' <small>/ '+goal.target+'</small></strong><div class="goal-progress"><i style="width:'+Math.min(100,pct)+'%"></i></div><b>'+pct+'%'+(done?' · Meta alcançada':'')+'</b></article>';}).join("")+'</div></section>';
+  function renderGoalsSummary(model){
+    var labels={contacts:"Contatos",meetings:"Reuniões",proposals:"Propostas",sales:"Vendas"},goals=state.settings.goals,dashboardRange=model.interval;
+    return '<section class="section goals-summary"><div class="section-head compact"><div><div class="section-label">Metas</div><p>Seu progresso no período · ciclos e alvos preservados</p></div><button class="btn btn-sm btn-ghost" data-view="configuracoes">Editar metas '+icon("arrow")+'</button></div><div class="goal-grid">'+Object.keys(labels).map(function(key){var goal=goals[key],range=rangeForPeriod(goal.period);if(dashboardRange){range.start=[range.start,dashboardRange.start].filter(Boolean).sort().pop()||"";range.end=[range.end,dashboardRange.end].filter(Boolean).sort()[0]||"";}var current=window.MicaDashboard.goalProgress(model,key,range),pct=Math.round(current/goal.target*100),done=pct>=100;return '<article class="goal-card '+(done?'is-complete':'')+'"><div><span>'+labels[key]+'</span><em>'+(goal.period==="month"?'Mensal':'Semanal')+'</em></div><strong>'+current+' <small>/ '+goal.target+'</small></strong><div class="goal-progress" role="progressbar" aria-label="'+labels[key]+'" aria-valuemin="0" aria-valuemax="'+goal.target+'" aria-valuenow="'+Math.min(current,goal.target)+'" aria-valuetext="'+current+' de '+goal.target+'"><i style="width:'+Math.min(100,pct)+'%"></i></div><b>'+pct+'%'+(done?' · Meta alcançada':'')+'</b></article>';}).join("")+'</div></section>';
   }
 
   function reportRange(){return rangeForPeriod(ui.reportPeriod,ui.reportStart,ui.reportEnd);}
