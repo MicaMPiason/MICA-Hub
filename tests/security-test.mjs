@@ -151,6 +151,30 @@ check('Build excludes private leads, environment files and source files', () => 
 check('Public configuration contains no privileged keys', () => { const config = read('assets/js/supabase-config.js'); assert(!/service_role|sb_secret_|client_secret|eyJ/.test(config)); });
 check('Security headers deny inline scripts and framing', () => { const headers = JSON.parse(read('vercel.json')).headers[0].headers; const csp = headers.find(h => h.key === 'Content-Security-Policy').value; assert(csp.includes("script-src 'self';")); assert(csp.includes("frame-ancestors 'none'")); });
 
+h = harness({session:account,payload:doc,revision:8});await h.api.boot();
+let acknowledge;
+h.mock.response=(name,params)=>name==='save_crm'?new Promise(resolve=>{acknowledge=resolve;}):Promise.resolve({data:{ok:true,payload:doc,revision:8},error:null});
+const atomicDocument={...doc,meta:{lastOperationId:'atomic-1'},records:{lead:{pipeline:{stage:'em_contato'},history:[{id:'atomic-1-stage'}]}}};
+const atomicWrite=h.win.MicaData.commit(atomicDocument);
+for(let tick=0;tick<10&&!acknowledge;tick++)await Promise.resolve();
+check('Atomic commercial write waits for server acknowledgement',()=>{assert(acknowledge);assert(!h.win.MicaData.load().meta);assert(h.win.MicaCloud.pending);});
+await h.api.signout();
+check('Cannot sign out during a commercial transaction',()=>assert.equal(h.metrics.signouts,0));
+acknowledge({data:{ok:true,revision:9},error:null});await atomicWrite;
+check('Stage and activity become visible together after acknowledgement',()=>{assert.equal(h.win.MicaData.load().meta.lastOperationId,'atomic-1');assert.equal(h.api.state.revision,9);assert(!h.win.MicaCloud.pending);});
+h=harness({session:account,payload:doc,revision:8});await h.api.boot();
+h.mock.response=async name=>name==='save_crm'?{data:null,error:{code:'network_error'}}:{data:{ok:true,payload:doc,revision:8},error:null};
+await assert.rejects(h.win.MicaData.commit(atomicDocument));
+check('Failed commercial write never replaces acknowledged business data',()=>{assert.equal(JSON.stringify(h.win.MicaData.load()),JSON.stringify(doc));assert(!h.api.state.blocked);});
+h=harness({session:account,payload:doc,revision:8});await h.api.boot();
+h.mock.response=async name=>name==='save_crm'?{data:null,error:{code:'network_error'}}:{data:{ok:true,payload:atomicDocument,revision:9},error:null};
+await h.win.MicaData.commit(atomicDocument);
+check('Lost response is reconciled by operation ID without a duplicate write',()=>{assert.equal(h.api.state.revision,9);assert.equal(h.calls.filter(call=>call.name==='save_crm').length,1);});
+h=harness({session:account,payload:doc,revision:8});await h.api.boot();
+h.mock.response=async name=>name==='save_crm'?{data:{ok:false,error:'conflict'},error:null}:{data:{ok:true,payload:{...doc,meta:{lastOperationId:'other-session'}},revision:9},error:null};
+await assert.rejects(h.win.MicaData.commit(atomicDocument));
+check('Concurrent commercial conflict preserves draft for backup and blocks overwrite',()=>{assert(h.api.state.blocked);assert(h.api.state.pending.includes('atomic-1'));assert.equal(h.calls.filter(call=>call.name==='save_crm').length,1);});
+
 if (process.argv.includes('--live')) {
   const cfg = read('assets/js/supabase-config.js');
   const url = cfg.match(/https:\/\/[a-z]+\.supabase\.co/)[0];

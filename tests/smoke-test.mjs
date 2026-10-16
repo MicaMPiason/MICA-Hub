@@ -23,6 +23,14 @@ async function waitForDownload(extension, timeout = 5000, matches = () => true) 
   }
   return "";
 }
+async function confirmCommercialForm(fields={}){
+  await cdp.evaluate(`(() => {const form=document.querySelector('#pipeline-move-form,#commercial-activity-form');if(!form)throw new Error('Commercial form missing');for(const [key,value] of Object.entries(${JSON.stringify(fields)})){const control=form.elements[key];if(control){control.value=value;control.dispatchEvent(new Event('change',{bubbles:true}));}}if(form.elements.service&&!form.elements.service.value)form.elements.service.value='Site institucional';form.requestSubmit();})()`);
+  if(!await waitFor(cdp,`!document.querySelector('#pipeline-move-form,#commercial-activity-form')`,6000))throw new Error('Commercial form not persisted: '+await cdp.evaluate(`document.querySelector('[data-commercial-error]')?.textContent`));
+}
+async function moveTestLead(destination,fields={}){
+  await cdp.evaluate(`(() => {document.querySelector('[data-view="leads"]').click();const row=Array.from(document.querySelectorAll('tbody tr')).find(item=>item.textContent.includes('Teste Automação')),control=row.querySelector('[data-stage-id]'),target=window.MicaPipeline.resolve(${JSON.stringify(destination)});control.value=target.stage;control.dispatchEvent(new Event('change',{bubbles:true}));const form=document.getElementById('pipeline-move-form');form.elements.substatus.value=target.substatus;form.elements.substatus.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await confirmCommercialForm({meetingDate:new Date().toISOString().slice(0,10),meetingTime:'14:00',meetingPlace:'Online',...fields});
+}
 
 function makeXlsxFixture() {
   const entries = {
@@ -95,7 +103,7 @@ try {
   await cdp.evaluate(`localStorage.setItem("crm_climatizacao_sp_v1", JSON.stringify({salvoEm:"2026-01-01T00:00:00Z",marcador:"preservar"}))`);
 
   await cdp.evaluate(`document.querySelector('[data-view="pipeline"]').click()`);
-  assert("Pipeline possui 8 etapas", await cdp.evaluate(`document.querySelectorAll(".pipeline-column").length === 8`));
+  assert("Pipeline possui quatro etapas", await cdp.evaluate(`document.querySelectorAll(".pipeline-column").length === 4`));
   assert("Drag-and-drop está habilitado", await cdp.evaluate(`document.querySelector(".pipeline-card")?.draggable === true`));
   await cdp.evaluate(`document.querySelector('[data-action="start-prospect"]').click()`);
   assert("Modo prospecção monta a fila", await cdp.evaluate(`document.getElementById("prospect-filter-form") !== null`));
@@ -145,6 +153,7 @@ try {
   await cdp.evaluate(`window.__waUrl="";window.open=(url)=>{window.__waUrl=url};document.querySelector('[data-action="whatsapp"]').click()`);
   await cdp.evaluate(`document.querySelector('[data-wa-template="primeiro"]').click()`);
   assert("WhatsApp abre wa.me com template", await cdp.evaluate(`window.__waUrl.startsWith("https://wa.me/5511999998888?text=") && decodeURIComponent(window.__waUrl).includes("Teste Automação") && decodeURIComponent(window.__waUrl).includes("Vendedor")`));
+  await confirmCommercialForm();
 
   const today = await cdp.evaluate(`(() => {const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")})()`);
   await cdp.evaluate(`(() => {const e=document.querySelector('[data-next="type"]');e.value="Ligar";e.dispatchEvent(new Event("change",{bubbles:true}))})()`);
@@ -153,32 +162,33 @@ try {
   await cdp.evaluate(`document.querySelector('[data-action="close-drawer"]').click();document.querySelector('[data-view="hoje"]').click()`);
   assert("Próxima ação alimenta Hoje", await cdp.evaluate(`document.body.textContent.includes("Ligar · Teste Automação")`));
 
-  await cdp.evaluate(`document.querySelector('[data-view="pipeline"]').click();const c=[...document.querySelectorAll(".pipeline-card")].find(x=>x.textContent.includes("Teste Automação"));c.querySelector('[data-action="quick-result"]').click()`);
-  await cdp.evaluate(`document.querySelector('[data-result="no_answer"]').click()`);
-  assert("Não atendeu incrementa tentativa", await cdp.evaluate(`[...document.querySelectorAll(".pipeline-card")].some(x=>x.textContent.includes("Teste Automação")&&x.textContent.includes("1 tent."))`));
-  assert("Não atendeu mantém Tentando contato", await cdp.evaluate(`document.querySelector('[data-drop-stage="tentando_contato"]').textContent.includes("Teste Automação")`));
+  await cdp.evaluate(`document.querySelector('[data-view="pipeline"]').click();const c=[...document.querySelectorAll(".pipeline-card")].find(x=>x.textContent.includes("Teste Automação"));c.querySelector('[data-action="call"]').click()`);
+  await confirmCommercialForm({type:"call",result:"Não atendeu"});
+  assert("Não atendeu incrementa tentativa",await cdp.evaluate(`Object.values(window.MicaData.load().records).some(record=>record.attempts===1)`));
+  assert("Atividade não movimenta etapa automaticamente", await cdp.evaluate(`document.querySelector('[data-drop-stage="a_prospectar"]').textContent.includes("Teste Automação")`));
 
-  await cdp.evaluate(`(() => {const c=[...document.querySelectorAll(".pipeline-card")].find(x=>x.textContent.includes("Teste Automação"));const t=document.querySelector('[data-drop-stage="conversou"]');const dt=new DataTransfer();c.dispatchEvent(new DragEvent("dragstart",{bubbles:true,dataTransfer:dt}));t.dispatchEvent(new DragEvent("dragover",{bubbles:true,dataTransfer:dt}));t.dispatchEvent(new DragEvent("drop",{bubbles:true,dataTransfer:dt}));})()`);
-  assert("Drag-and-drop move lead", await waitFor(cdp, `document.querySelector('[data-drop-stage="conversou"]').textContent.includes("Teste Automação")`));
+  await cdp.evaluate(`(() => {const c=[...document.querySelectorAll(".pipeline-card")].find(x=>x.textContent.includes("Teste Automação"));const t=document.querySelector('[data-drop-stage="em_contato"]');const dt=new DataTransfer();c.dispatchEvent(new DragEvent("dragstart",{bubbles:true,dataTransfer:dt}));t.dispatchEvent(new DragEvent("dragover",{bubbles:true,dataTransfer:dt}));t.dispatchEvent(new DragEvent("drop",{bubbles:true,dataTransfer:dt}));})()`);
+  await confirmCommercialForm({substatus:"Conversou"});
+  assert("Drag-and-drop move lead", await waitFor(cdp, `document.querySelector('[data-drop-stage="em_contato"]').textContent.includes("Teste Automação")`));
 
   await cdp.evaluate(`(() => {document.querySelector('[data-view="leads"]').click();const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação"));const s=row.querySelector("select");s.value="perdido";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Mover para perdido solicita motivo", await cdp.evaluate(`document.getElementById("loss-form") !== null`));
-  await cdp.evaluate(`(() => {const f=document.getElementById("loss-form");f.elements.reason.value="Preço";f.elements.note.value="Teste de perda";document.querySelector('button[form="loss-form"]').click()})()`);
-  const lossSaved = await waitFor(cdp, `!document.getElementById("loss-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="perdido"&&s.records[l.id].negotiation.lossReason==="Preço"})()`);
-  const lossDebug = await cdp.evaluate(`(() => {const f=document.getElementById("loss-form"),b=document.querySelector('button[form="loss-form"]'),s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return {form:!!f,valid:f?.checkValidity(),reason:f?.elements.reason?.value,formId:f?.id,buttonForm:b?.form?.id,stage:s.records[l.id].stage,toast:document.querySelector(".toast")?.textContent||""}})()`);
+  assert("Mover para perdido solicita motivo", await cdp.evaluate(`document.getElementById("pipeline-move-form") !== null`));
+  await cdp.evaluate(`(() => {const f=document.getElementById("pipeline-move-form");f.elements.lossReason.value="Preço acima do orçamento";f.elements.note.value="Teste de perda";document.querySelector('button[form="pipeline-move-form"]').click()})()`);
+  const lossSaved = await waitFor(cdp, `!document.getElementById("pipeline-move-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="perdido"&&s.records[l.id].negotiation.lossReason==="Preço acima do orçamento"})()`);
+  const lossDebug = await cdp.evaluate(`(() => {const f=document.getElementById("pipeline-move-form"),b=document.querySelector('button[form="pipeline-move-form"]'),s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return {form:!!f,valid:f?.checkValidity(),reason:f?.elements.reason?.value,formId:f?.id,buttonForm:b?.form?.id,stage:s.records[l.id].stage,toast:document.querySelector(".toast")?.textContent||""}})()`);
   assert("Motivo de perda é salvo", lossSaved, JSON.stringify(lossDebug));
 
   await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação"));const s=row.querySelector("select");s.value="fechado";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Fechado solicita valor", await cdp.evaluate(`document.getElementById("close-form") !== null`));
-  await cdp.evaluate(`(() => {const f=document.getElementById("close-form");f.elements.value.value="1500";f.elements.note.value="Fechamento automático";document.querySelector('button[form="close-form"]').click()})()`);
-  assert("Fechamento é registrado", await waitFor(cdp, `!document.getElementById("close-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="fechado"})()`));
+  assert("Fechado solicita valor", await cdp.evaluate(`document.getElementById("pipeline-move-form") !== null`));
+  await cdp.evaluate(`(() => {const f=document.getElementById("pipeline-move-form");f.elements.service.value="Site institucional";f.elements.value.value="1500";f.elements.note.value="Fechamento automático";document.querySelector('button[form="pipeline-move-form"]').click()})()`);
+  assert("Fechamento é registrado", await waitFor(cdp, `!document.getElementById("pipeline-move-form") && (()=>{const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.records[l.id].stage==="fechado"})()`));
   await sleep(300);
   const closedRecord = await cdp.evaluate(`(() => {const s=window.MicaData.load();const l=s.extraLeads.find(x=>x.nome==="Teste Automação");return l&&s.records[l.id]})()`);
   assert("Valor fechado persiste", closedRecord?.stage === "fechado" && Number(closedRecord?.negotiation?.closedValue) === 1500, JSON.stringify(closedRecord));
   assert("Venda fechada gera receita financeira automática", await cdp.evaluate(`(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),x=s.financial.transactions.find(x=>x.source==="closed_deal"&&x.leadId===l.id);return x?.type==="income"&&x?.category==="Venda"&&x?.amount===1500&&x?.description.includes("Teste Automação")&&x?.notes.includes("Fechamento automático")})()`));
-  await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="negociacao";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Retirar de Fechado remove a receita automática", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return !s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
-  await cdp.evaluate(`(() => {const updated=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")).querySelector("select");updated.value="fechado";updated.dispatchEvent(new Event("change",{bubbles:true}));const f=document.getElementById("close-form");f.elements.value.value="1500";f.requestSubmit()})()`);
+  await moveTestLead("negociacao");
+  assert("Reabrir negócio preserva receita e auditoria", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
+  await moveTestLead("fechado",{value:"1500"});
   assert("Reconfirmar a mesma venda não duplica a receita", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação");return s.financial.transactions.filter(x=>x.source==="closed_deal"&&x.leadId===l.id).length===1})()`));
 
   await cdp.evaluate(`(() => {const csv="company_name;phone;email_address;city\\nImportado CSV;11911112222;csv@nexo.local;Osasco\\nDuplicado CSV;11999998888;duplicado@nexo.local;São Paulo";const file=new File([csv],"teste-colunas-variadas.csv",{type:"text/csv"});const dt=new DataTransfer();dt.items.add(file);const input=document.getElementById("file-spreadsheet");input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()`);
@@ -326,11 +336,11 @@ try {
   await cdp.evaluate(`window.MicaCloud.flush().then(()=>location.reload())`);
   assert("Metas permanecem após recarregar", await waitFor(cdp, `(() => {const g=window.MicaData.load()?.settings?.goals;return document.readyState==="complete"&&g?.contacts?.target===1&&g?.meetings?.period==="month"})()`, 8000));
   await cdp.evaluate(`document.querySelector('[data-view="leads"]').click()`);
-  await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="reuniao_agendada";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Mover lead para reunião registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="reuniao_agendada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="reuniao_agendada")})()`));
-  await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="proposta_enviada";s.dispatchEvent(new Event("change",{bubbles:true}))})()`);
-  assert("Mover lead para proposta registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="proposta_enviada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="proposta_enviada")})()`));
-  await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="fechado";s.dispatchEvent(new Event("change",{bubbles:true}));const f=document.getElementById("close-form");f.elements.value.value="1500";f.requestSubmit()})()`);
+  await moveTestLead("reuniao_agendada");
+  assert("Mover lead para reunião registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="reuniao_agendada"&&r.history.some(x=>["stage","reopen"].includes(x.type)&&x.meta?.substatus==="Reunião agendada")})()`));
+  await moveTestLead("proposta_enviada");
+  assert("Mover lead para proposta registra marco real", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="proposta_enviada"&&r.history.some(x=>x.type==="stage"&&x.meta?.to==="propostas")})()`));
+  await cdp.evaluate(`(() => {const row=[...document.querySelectorAll("tbody tr")].find(x=>x.textContent.includes("Teste Automação")),s=row.querySelector("select");s.value="fechado";s.dispatchEvent(new Event("change",{bubbles:true}));const f=document.getElementById("pipeline-move-form");f.elements.service.value="Site institucional";f.elements.value.value="1500";f.requestSubmit()})()`);
   assert("Mover lead para venda registra marco e financeiro", await waitFor(cdp, `(() => {const s=window.MicaData.load(),l=s.extraLeads.find(x=>x.nome==="Teste Automação"),r=s.records[l.id];return r.stage==="fechado"&&s.financial.transactions.some(x=>x.source==="closed_deal"&&x.leadId===l.id)})()`));
   await cdp.evaluate(`document.querySelector('[data-view="dashboard"]').click()`);
   assert("Dashboard mostra quatro metas automáticas", await cdp.evaluate(`document.querySelectorAll(".goal-card").length===4 && [...document.querySelectorAll(".goal-card")].every(x=>x.textContent.includes("/ 1")&&x.textContent.includes("100%"))`));
@@ -419,7 +429,7 @@ try {
   await cdp.evaluate(`document.querySelector('[data-view="agenda"]').click()`);
   assert("Agenda renderiza", await cdp.evaluate(`document.querySelectorAll(".agenda-day").length === 7`));
   await cdp.evaluate(`document.querySelector('[data-view="pipeline"]').click()`);
-  assert("Segmento selecionado limita o pipeline", await cdp.evaluate(`(() => {const s=window.MicaData.load(),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return document.querySelectorAll(".pipeline-card").length===expected})()`));
+  assert("Segmento selecionado limita o pipeline operacional", await cdp.evaluate(`(() => {const s=window.MicaData.load(),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId&&!window.MicaPipeline.finished(s.records[l.id])).length;return document.querySelectorAll(".pipeline-card").length===expected})()`));
   await cdp.evaluate(`document.querySelector('[data-view="dashboard"]').click()`);
   assert("Segmento selecionado limita as métricas", await cdp.evaluate(`(() => {const s=window.MicaData.load(),expected=s.extraLeads.filter(l=>(s.records[l.id]?.profile?.businessSegmentId||l.businessSegmentId||"seg_unclassified")===s.lastSegmentId).length;return Number(document.querySelector(".dash-stat b")?.textContent)===expected})()`));
   const dashboardHasRevenue = await cdp.evaluate(`document.body.textContent.includes("1.500")`);

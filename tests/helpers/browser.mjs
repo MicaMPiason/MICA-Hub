@@ -45,9 +45,17 @@ class CDP {
 // This adapter exists only on the isolated test server, never in the app/build.
 function mockCloud(payload) {
   let memory = payload, writes = Promise.resolve(), pending = 0;
-  window.MicaCloud = { active: true, flush: () => writes, get pending() { return pending > 0; } };
+  window.MicaCloud = { active: true, userId:'fixture-user', flush: () => writes, get pending() { return pending > 0; } };
   window.MicaData = {
     load: () => structuredClone(memory),
+    async commit(value) {
+      await writes;
+      if (window.__failCommercialWrite) throw new Error('Simulated connection failure');
+      if (window.__commercialWriteDelay) await new Promise(resolve=>setTimeout(resolve,window.__commercialWriteDelay));
+      const response=await fetch('/__test__/document',{method:'PUT',body:JSON.stringify(value)});
+      if(!response.ok)throw new Error('Test persistence failed');
+      memory=structuredClone(value);return true;
+    },
     save(value) {
       memory = structuredClone(value);
       const snapshot = JSON.stringify(memory); pending++;

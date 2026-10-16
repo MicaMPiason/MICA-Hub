@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 let client, userId, started = false, revision = 0, memory = null, pending = null;
 let saving = false, timer, blocked = false, authMode = 'login', authBusy = false;
 let enrollmentId = null, starting = false;
+let writePromise = null, committing = false;
 const root = () => document.getElementById('auth-root');
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -54,7 +55,12 @@ async function rpc(name, params) {
   }
   return data;
 }
-async function flush() {
+function flush() {
+  if (writePromise) return writePromise;
+  writePromise = flushPending().finally(() => { writePromise = null; });
+  return writePromise;
+}
+async function flushPending() {
   clearTimeout(timer);
   timer = null;
   if (saving || blocked || !pending) return;
@@ -78,6 +84,43 @@ async function flush() {
     if (pending && !blocked && !timer) timer = setTimeout(flush, 1500);
   }
 }
+async function commitDocument(value) {
+  if (committing || blocked) throw new Error('Aguarde a sincronização atual antes de confirmar.');
+  committing = true;
+  try {
+    await flush();
+    if (pending) await flush();
+    if (pending || blocked) throw new Error('Existem alterações não sincronizadas. Tente novamente após reconectar.');
+    const owner = userId;
+    const document = JSON.parse(JSON.stringify(value));
+    const operationId = document.meta?.lastOperationId;
+    if (!operationId) throw new Error('Identificador da operação ausente.');
+    status('saving', 'Confirmando alteração…');
+    let result, persisted = document;
+    try {
+      result = await rpc('save_crm', { document, expected_revision: revision });
+    } catch (error) {
+      if (blocked || owner !== userId) throw new Error('A sessão mudou. Entre novamente.');
+      const remote = await rpc('load_crm').catch(() => null);
+      if (remote?.payload?.meta?.lastOperationId === operationId) { result = remote; persisted = remote.payload; }
+      else {
+        if (error.code === 'conflict' || remote && remote.revision !== revision) {
+          memory = JSON.stringify(document); pending = memory;
+          fatal(new Error('Outra sessão alterou a base. Baixe o rascunho e recarregue antes de continuar.'));
+        }
+        throw error;
+      }
+    }
+    if (blocked || owner !== userId) throw new Error('A sessão mudou. Entre novamente.');
+    revision = result.revision;
+    memory = JSON.stringify(persisted);
+    status('saved', 'Salvo na nuvem');
+    return true;
+  } catch (error) {
+    status('error', 'Alteração não confirmada — revise a conexão e tente novamente');
+    throw error;
+  } finally { committing = false; }
+}
 async function start(session) {
   if (started || starting) return;
   if (!session?.user) { showAuth(); return; }
@@ -90,17 +133,18 @@ async function start(session) {
   const data = await rpc('load_crm');
   revision = data.revision;
   memory = data.payload ? JSON.stringify(data.payload) : null;
-  window.MicaCloud = { active: true, flush, get pending() { return !!pending || saving; } };
+  window.MicaCloud = { active: true, flush, get userId() { return userId; }, get pending() { return !!pending || saving || committing; } };
   window.MicaData = {
     load() { return memory ? JSON.parse(memory) : {}; },
     save(value) {
-      if (blocked) return false;
+      if (blocked || committing) return false;
       memory = JSON.stringify(value);
       pending = memory;
       clearTimeout(timer);
       timer = setTimeout(() => { timer = null; flush(); }, 1500);
       return true;
-    }
+    },
+    commit: commitDocument
   };
   started = true;
   root().hidden = true;
@@ -173,6 +217,7 @@ async function submit(event) {
   finally { authBusy = false; button.disabled = false; }
 }
 async function signout(discard = false) {
+  if (committing) { status('saving', 'Aguarde a confirmação da alteração antes de sair.'); return; }
   if (discard) {
     if (!confirm('Descartar as alterações que ainda não foram salvas na nuvem e sair? Baixe uma cópia antes se quiser preservá-las.')) return;
     pending = null;
@@ -243,7 +288,7 @@ async function boot() {
   if (error) { await client.auth.signOut({ scope: 'local' }); showAuth('login', 'Sua sessão expirou ou o acesso não foi concluído. Entre novamente.', true); return; }
   if (!recovery) await start(session);
   addEventListener('online', () => { if (!blocked) flush(); });
-  addEventListener('beforeunload', event => { if (pending || saving) { event.preventDefault(); event.returnValue = ''; } });
+  addEventListener('beforeunload', event => { if (pending || saving || committing) { event.preventDefault(); event.returnValue = ''; } });
 }
 
 boot().catch(error => fatal(error));

@@ -9,7 +9,8 @@
     "test": "node tests/smoke-test.mjs",
     "test:security": "node tests/security-test.mjs",
     "test:sidebar": "node tests/sidebar-test.mjs",
-    "test:responsive": "node tests/responsive-test.mjs"
+    "test:responsive": "node tests/responsive-test.mjs",
+    "test:pipeline": "node tests/pipeline-model-test.mjs && node tests/pipeline-test.mjs && node tests/pipeline-volume-test.mjs"
   },
   "dependencies": { "@supabase/supabase-js": "2.118.0" },
   "devDependencies": { "esbuild": "0.28.2", "supabase": "2.121.0" }

@@ -31,7 +31,7 @@ async function checkLayout(name) {
     const selectors='.topbar,.view-root,.modal,.modal-body,.modal-foot,.data-actions,.metrics-grid,.metric-card,.priority-grid,.task-columns,.kanban-v2,.pipeline-column,.agenda-grid,.table-shell,.data-table,.preview-shell,.import-preview,.settings-layout,.financial-filters,.report-toolbar,.catalog-filters,.proposal-builder,.proposal-editor,.proposal-item-row,.proposal-adjustments,.proposal-live-preview,.proposal-preview-stage,.lead-drawer.is-open,.drawer-body,.drawer-hero,.session-card,.prospect-session,.btn';
     const visible=element=>element.getClientRects().length&&!element.closest('[hidden]');
     const bad=Array.from(document.querySelectorAll(selectors)).filter(visible).filter(element=>element.scrollWidth>element.clientWidth+1&&!element.matches('.metric-card')).map(element=>({class:element.className,width:element.clientWidth,content:element.scrollWidth,children:Array.from(element.children).filter(child=>child.getBoundingClientRect().right>element.getBoundingClientRect().right+1).map(child=>child.className)}));
-    Array.from(document.querySelectorAll('body *')).filter(visible).filter(element=>['auto','scroll'].includes(getComputedStyle(element).overflowX)&&element.scrollWidth>element.clientWidth+1&&!element.matches('input,textarea')).forEach(element=>bad.push({scrollable:element.className,width:element.clientWidth,content:element.scrollWidth}));
+    Array.from(document.querySelectorAll('body *')).filter(visible).filter(element=>['auto','scroll'].includes(getComputedStyle(element).overflowX)&&element.scrollWidth>element.clientWidth+1&&!element.matches('input,textarea,.pipeline-board-shell')).forEach(element=>bad.push({scrollable:element.className,width:element.clientWidth,content:element.scrollWidth}));
     if(document.documentElement.scrollWidth>innerWidth+1)bad.push({page:document.documentElement.scrollWidth,viewport:innerWidth});
     return bad;
   })()`);
@@ -49,7 +49,7 @@ try {
       await click('.side-link[data-view="' + view + '"]');
       await checkLayout(size + ' ' + view);
       if (view === 'leads') assert(size + ': todos os campos dos leads mantêm rótulos', await cdp.evaluate(`document.querySelectorAll('.data-table tbody tr').length===12&&Array.from(document.querySelectorAll('.data-table tbody td')).every(cell=>cell.dataset.label)&&document.querySelectorAll('[data-sort]').length===13`));
-      if (view === 'pipeline') assert(size + ': todas as etapas acessíveis', await cdp.evaluate(`document.querySelectorAll('.pipeline-column').length===8&&Array.from(document.querySelectorAll('.pipeline-column')).every(column=>{const bounds=column.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth+1})`));
+      if (view === 'pipeline') assert(size + ': quatro etapas acessíveis sem comprimir cards', await cdp.evaluate(`document.querySelectorAll('.pipeline-column').length===4&&document.querySelectorAll('[data-pipeline-tab]').length===4&&Array.from(document.querySelectorAll('.pipeline-column')).filter(column=>getComputedStyle(column).display!=='none').every(column=>column.clientWidth>=250)`));
       if (view === 'configuracoes') await click('[data-theme-choice="light"]');
       if (screenshotDir && [320,1440].includes(width) && ['pipeline','leads'].includes(view)) await screenshot(size + '-' + view);
     }
